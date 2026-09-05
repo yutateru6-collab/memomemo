@@ -1,0 +1,36 @@
+name: Apply Memomemo Audit Fixes
+
+on:
+  push:
+    branches:
+      - 'qa/memomemo-audit-20260905'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !startsWith(github.event.head_commit.message || '', 'fix: apply audited memomemo safety fixes') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply source fixes
+        run: python3 scripts/apply-audit-fixes.py
+
+      - name: Commit fixes if changed
+        run: |
+          if git diff --quiet; then
+            echo "No source changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src index.html
+          git commit -m "fix: apply audited memomemo safety fixes"
+          git push origin HEAD:${GITHUB_REF_NAME}
