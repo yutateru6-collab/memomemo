@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
@@ -25,6 +25,24 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.2.15
+
+      - name: Repair lockfile for Cloudflare Bun on setup branch
+        if: github.event_name == 'push'
+        run: |
+          if bun install --frozen-lockfile; then
+            echo "bun.lock is already compatible with Bun 1.2.15"
+          else
+            echo "Regenerating bun.lock with Bun 1.2.15"
+            rm -f bun.lock
+            bun install --lockfile-only
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add bun.lock
+            if ! git diff --cached --quiet; then
+              git commit -m "Regenerate bun.lock for Cloudflare Bun 1.2.15"
+              git push origin HEAD:${GITHUB_REF_NAME}
+            fi
+          fi
 
       - name: Install dependencies exactly as Cloudflare does
         run: bun install --frozen-lockfile
