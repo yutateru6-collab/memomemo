@@ -3,7 +3,11 @@ name: Memomemo QA Audit
 on:
   push:
     branches:
+      - main
       - 'qa/memomemo-audit-*'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
