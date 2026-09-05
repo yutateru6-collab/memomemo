@@ -57,7 +57,7 @@ jobs:
       - name: User-flow browser QA
         run: |
           mkdir -p qa-artifacts
-          cat > /tmp/memomemo-qa.mjs <<'EOF'
+          cat > qa-audit.mjs <<'EOF'
           import { chromium } from 'playwright';
           import fs from 'node:fs';
 
@@ -276,7 +276,7 @@ jobs:
           console.log(JSON.stringify({ findingCount: findings.length, findings }, null, 2));
           if (findings.length > 0) process.exit(1);
           EOF
-          node /tmp/memomemo-qa.mjs
+          node qa-audit.mjs
 
       - name: Print Vite log
         if: always()
