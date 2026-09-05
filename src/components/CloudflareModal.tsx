@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CloudflareSyncConfig, Note } from '../types';
 import { SAMPLE_WORKER_CODE } from '../services/cloudflareSync';
+import { normalizeNotes } from '../services/storage';
 import { X, Cloud, RefreshCw, Check, Copy, AlertCircle, Download, Upload, Server } from 'lucide-react';
 
 interface CloudflareModalProps {
@@ -8,7 +9,7 @@ interface CloudflareModalProps {
   onClose: () => void;
   config: CloudflareSyncConfig;
   onSaveConfig: (config: CloudflareSyncConfig) => void;
-  onTriggerSync: () => Promise<void>;
+  onTriggerSync: (config?: CloudflareSyncConfig) => Promise<void>;
   notes: Note[];
   onImportNotes: (notes: Note[]) => void;
 }
@@ -27,6 +28,10 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
   const [isSyncing, setIsSyncing] = useState(false);
   const [showCode, setShowCode] = useState(false);
 
+  useEffect(() => {
+    if (isOpen) setFormData(config);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSave = () => {
@@ -37,7 +42,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
     onSaveConfig(formData);
     setIsSyncing(true);
     try {
-      await onTriggerSync();
+      await onTriggerSync(formData);
     } finally {
       setIsSyncing(false);
     }
@@ -49,35 +54,55 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
-  // Export local notes JSON
+  // Export a versioned backup. Import remains backward compatible with old array-only backups.
   const handleExportJSON = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(notes, null, 2));
+    const backup = {
+      format: 'memomemo-backup',
+      version: 2,
+      exportedAt: new Date().toISOString(),
+      notes,
+    };
+    const dataStr =
+      'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backup, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `ios_notes_backup_${new Date().toISOString().slice(0, 10)}.json`);
+    downloadAnchor.setAttribute('download', `memomemo_backup_${new Date().toISOString().slice(0, 10)}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
   };
 
-  // Import local notes JSON
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const input = e.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const parsed = JSON.parse(event.target?.result as string);
-        if (Array.isArray(parsed)) {
-          onImportNotes(parsed);
-          alert(`${parsed.length} 件のメモをインポートしました。`);
-        } else {
-          alert('不正なメモファイル形式です。');
+        const parsed: unknown = JSON.parse(event.target?.result as string);
+        const candidate =
+          typeof parsed === 'object' && parsed !== null && 'notes' in parsed
+            ? (parsed as { notes?: unknown }).notes
+            : parsed;
+        const imported = normalizeNotes(candidate);
+
+        if (!imported) {
+          alert('このJSONはMemomemoのバックアップとして読み込めません。現在のメモは変更していません。');
+          return;
         }
+
+        onImportNotes(imported);
+        alert(`${imported.length} 件のメモをインポートしました。`);
       } catch {
-        alert('ファイルの読み込みに失敗しました。');
+        alert('ファイルの読み込みに失敗しました。現在のメモは変更していません。');
+      } finally {
+        input.value = '';
       }
+    };
+    reader.onerror = () => {
+      alert('ファイルの読み込みに失敗しました。現在のメモは変更していません。');
+      input.value = '';
     };
     reader.readAsText(file);
   };
@@ -102,7 +127,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
             <div>
               <h2 className="text-base font-semibold">Cloudflare 同期設定</h2>
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Workers KV を使って複数端末間でメモを安全に同期
+                Workers KV を使って複数端末間でメモを同期
               </p>
             </div>
           </div>
@@ -176,7 +201,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
 
             <div>
               <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
-                API トークン（任意 / 認証保護時）
+                API トークン（WorkerでSYNC_TOKENを設定した場合）
               </label>
               <input
                 id="cf-api-token-input"
@@ -205,7 +230,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
             <div className="flex items-center justify-between pt-1">
               <div>
                 <span className="text-xs font-medium">変更時の自動同期</span>
-                <p className="text-[11px] text-neutral-500">メモ保存時にバックグラウンドで同期します</p>
+                <p className="text-[11px] text-neutral-500">変更後3秒ほどで同期します</p>
               </div>
               <input
                 id="cf-auto-sync-toggle"

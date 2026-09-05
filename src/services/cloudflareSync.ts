@@ -1,4 +1,5 @@
 import { Note, CloudflareSyncConfig } from '../types';
+import { normalizeNotes } from './storage';
 
 /**
  * Cloudflare Workers KV または REST API へのメモ同期クライアント
@@ -54,12 +55,22 @@ export async function syncWithCloudflare(
     }
 
     const data = await response.json().catch(() => null);
+    const remoteNotes = data && Object.prototype.hasOwnProperty.call(data, 'notes')
+      ? normalizeNotes(data.notes)
+      : null;
 
-    // サーバー側から新しいメモ一覧が返ってきた場合マージ対応
-    return {
-      success: true,
-      remoteNotes: data?.notes || notes
-    };
+    if (data && Object.prototype.hasOwnProperty.call(data, 'notes') && remoteNotes === null) {
+      return {
+        success: false,
+        error: '同期先から不正なメモデータが返されました。ローカルデータは変更していません。'
+      };
+    }
+
+    // remoteNotes is included only when the server actually returned a valid notes array.
+    // A normal "saved successfully" response must never echo stale local state back into React.
+    return remoteNotes === null
+      ? { success: true }
+      : { success: true, remoteNotes };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : '同期中に通信エラーが発生しました';
     return {
@@ -73,23 +84,36 @@ export async function syncWithCloudflare(
  * Cloudflare Worker 用のテンプレートコード（ユーザーがコピーしてすぐ使える）
  */
 export const SAMPLE_WORKER_CODE = `/**
- * Cloudflare Worker for iOS Notes Sync
+ * Cloudflare Worker for Memomemo Sync
  * 1. Cloudflare ダッシュボードで Workers & Pages > 作成
  * 2. KV ネームスペース 'NOTES_KV' をバインド
- * 3. 以下のコードを貼り付けてデプロイ
+ * 3. 任意: Worker secret SYNC_TOKEN を設定し、アプリ側にも同じAPIトークンを入力
+ * 4. 以下のコードを貼り付けてデプロイ
  */
 
 export default {
   async fetch(request, env, ctx) {
-    // CORS ヘッダー
+    const allowedOrigin = env.ALLOWED_ORIGIN || '*';
     const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': allowedOrigin,
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Vary': 'Origin',
     };
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
+    }
+
+    // If SYNC_TOKEN is configured as a Worker secret, every data request must authenticate.
+    if (env.SYNC_TOKEN) {
+      const expected = 'Bearer ' + env.SYNC_TOKEN;
+      if (request.headers.get('Authorization') !== expected) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
     }
 
     try {
