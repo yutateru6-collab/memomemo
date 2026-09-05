@@ -15,7 +15,7 @@ permissions:
 jobs:
   mobile-complete-ux:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -72,12 +72,37 @@ jobs:
               userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
             });
             const page = await context.newPage();
+
+            // Local Vite has no Cloudflare Worker route. Mock only that local endpoint so
+            // visual evidence does not show a fake red sync error after a successful save.
+            await page.route('**/api/sync', async route => {
+              await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ success: true, entries: [] }),
+              });
+            });
+
             await page.goto('http://127.0.0.1:3000', { waitUntil: 'networkidle' });
             await page.waitForSelector('#note-list-container');
             await page.addStyleTag({
               content: `:root{--safe-area-top:${c.top}px !important;--safe-area-bottom:${c.bottom}px !important;--safe-area-left:${c.left}px !important;--safe-area-right:${c.right}px !important;}`,
             });
             return { context, page };
+          }
+
+          async function setTheme(page, mode) {
+            const wantDark = mode === 'dark';
+            let isDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
+            if (isDark !== wantDark) {
+              await page.click('#theme-toggle-btn');
+              await page.waitForFunction(
+                (dark) => document.documentElement.classList.contains('dark') === dark,
+                wantDark
+              );
+              isDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
+            }
+            if (isDark !== wantDark) throw new Error(`Could not force ${mode} mode`);
           }
 
           async function rect(page, selector) {
@@ -112,10 +137,11 @@ jobs:
           }
 
           for (const c of cases) {
+            // ---------- LIGHT MODE: full numeric + visual audit ----------
             const { context, page } = await makePage(c);
+            await setTheme(page, 'light');
 
-            // HOME: this is the critical screenshot that previously was missing.
-            await snap(page, c, '01-home-top');
+            await snap(page, c, '01-light-home-top');
             const homeTitle = await page.getByRole('heading', { name: 'メモ', exact: true }).boundingBox();
             if (!homeTitle) addFailure(c.name, 'home title missing');
             if (homeTitle && homeTitle.y < c.top) addFailure(c.name, `home title enters status-bar safe area: y=${homeTitle.y.toFixed(1)}, safeTop=${c.top}`);
@@ -140,38 +166,45 @@ jobs:
             if (createRect.x < c.left) addFailure(c.name, `new memo action enters left safe area: x=${createRect.x}`);
             if (createRect.right > c.width - c.right + 0.5) addFailure(c.name, `new memo action enters right safe area: right=${createRect.right}`);
 
-            // Show the bottom of the actual memo list too.
+            if (c.name === 'iphone-landscape') {
+              const desktopToggleVisible = await page.locator('#toggle-iphone-frame-btn').isVisible().catch(() => false);
+              if (desktopToggleVisible) addFailure(c.name, 'desktop frame controls are visible on an iPhone in landscape');
+            }
+
             const listScroller = page.locator('#note-list-container .overflow-y-auto').last();
             if (await listScroller.count()) {
               await listScroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
               await page.waitForTimeout(100);
-              await snap(page, c, '02-home-bottom');
+              await snap(page, c, '02-light-home-bottom');
               await listScroller.evaluate((el) => { el.scrollTop = 0; });
+            } else {
+              addFailure(c.name, 'home note list scroller missing');
+              await snap(page, c, '02-light-home-bottom');
             }
 
-            // Cloudflare modal screenshot.
             await page.click('#cloudflare-header-btn');
             await page.waitForSelector('#cloudflare-modal-content');
             const cloudRect = await rect(page, '#cloudflare-modal-content');
             if (cloudRect.y < c.top) addFailure(c.name, `cloud modal enters top safe area: y=${cloudRect.y}`);
             if (cloudRect.bottom > c.height - c.bottom + 0.5) addFailure(c.name, `cloud modal enters bottom safe area: bottom=${cloudRect.bottom}`);
             await assertTouch(page, c, '#close-cloudflare-modal-btn', 'cloud modal close');
-            await snap(page, c, '03-cloudflare-modal');
+            await snap(page, c, '03-light-cloudflare-modal');
             await page.click('#close-cloudflare-modal-btn');
 
-            // Reminders modal screenshot.
             await page.click('#reminders-header-btn');
             await page.waitForSelector('#reminders-modal-content');
             const reminderRect = await rect(page, '#reminders-modal-content');
             if (reminderRect.y < c.top) addFailure(c.name, `reminder modal enters top safe area: y=${reminderRect.y}`);
             if (reminderRect.bottom > c.height - c.bottom + 0.5) addFailure(c.name, `reminder modal enters bottom safe area: bottom=${reminderRect.bottom}`);
             await assertTouch(page, c, '#close-reminders-modal-btn', 'reminder modal close');
-            await snap(page, c, '04-reminders-modal');
+            await snap(page, c, '04-light-reminders-modal');
             await page.click('#close-reminders-modal-btn');
 
-            // EDITOR top and save flow.
             await page.click('#create-new-note-bottom-btn');
             await page.waitForSelector('#note-editor-container');
+            if (c.name === 'iphone-landscape' && await page.locator('#note-list-container').count()) {
+              addFailure(c.name, 'landscape iPhone still shows split-view note list while editing');
+            }
             await page.fill('#note-title-input', `VISUAL QA ${c.name}`);
             await page.fill('#note-content-textarea', 'スマホ実画面の目視確認用メモです。\n上部・入力欄・保存導線・ToDo・添付表示を確認します。');
             const editorBack = await rect(page, '#editor-back-btn');
@@ -182,13 +215,12 @@ jobs:
             ]) await assertTouch(page, c, selector, label);
             const editorMetrics = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth }));
             if (editorMetrics.sw > editorMetrics.iw + 1) addFailure(c.name, `editor horizontal overflow ${editorMetrics.sw}px > ${editorMetrics.iw}px`);
-            await snap(page, c, '05-editor-top');
+            await snap(page, c, '05-light-editor-top');
 
             await page.click('#editor-save-btn');
             await page.waitForTimeout(250);
-            await snap(page, c, '06-editor-saved');
+            await snap(page, c, '06-light-editor-saved');
 
-            // ToDo screenshot + safe deletion affordance.
             await page.fill('#new-task-text-input', '明日やることを確認');
             await page.click('#add-task-btn');
             const unsafeTaskX = page.locator('button[aria-label="タスクを削除"], button[title="タスクを削除"]');
@@ -199,41 +231,75 @@ jobs:
               const tr = await taskMore.evaluate((el) => { const r=el.getBoundingClientRect(); return {width:r.width,height:r.height}; });
               if (tr.width < 44 || tr.height < 44) addFailure(c.name, `task More target is ${tr.width}x${tr.height}`);
             }
-            await snap(page, c, '07-editor-todo');
+            await snap(page, c, '07-light-editor-todo');
 
             if (await taskMore.count()) {
               await taskMore.click();
               await page.waitForTimeout(100);
-              await snap(page, c, '08-task-more-menu');
+              await snap(page, c, '08-light-task-more-menu');
               await taskMore.click();
+            } else {
+              await snap(page, c, '08-light-task-more-menu');
             }
 
-            // Editor More menu screenshot.
             await page.click('#editor-more-btn');
             await page.waitForSelector('#editor-more-menu');
-            await snap(page, c, '09-editor-more-menu');
+            await snap(page, c, '09-light-editor-more-menu');
             await page.click('#editor-more-btn');
 
-            // Markdown preview screenshot.
             await page.click('#mode-preview-btn');
             await page.waitForSelector('#note-markdown-rendered-view');
-            await snap(page, c, '10-preview');
+            await snap(page, c, '10-light-preview');
             await page.click('#mode-edit-btn');
 
-            // Attachment card + full-screen viewer screenshot.
             const fileInput = page.locator('input[type="file"][multiple]');
             await fileInput.setInputFiles({ name:'qa-safe.png', mimeType:'image/png', buffer:png1x1 });
             await page.waitForTimeout(250);
-            await snap(page, c, '11-editor-attachment');
+            await snap(page, c, '11-light-editor-attachment');
             await page.locator('[title="拡大表示 / 開く"]').first().click();
             await page.waitForSelector('#attachment-lightbox-overlay');
             await assertTouch(page, c, '#attachment-close-btn', 'attachment close');
             await assertTouch(page, c, '#attachment-download-btn', 'attachment save');
             const attachmentClose = await rect(page, '#attachment-close-btn');
             if (attachmentClose.y < c.top) addFailure(c.name, `attachment controls enter top safe area: y=${attachmentClose.y}`);
-            await snap(page, c, '12-attachment-viewer');
-
+            await snap(page, c, '12-light-attachment-viewer');
             await context.close();
+
+            // ---------- DARK MODE: visual review of the screens the user actually uses ----------
+            const { context: darkContext, page: darkPage } = await makePage(c);
+            await setTheme(darkPage, 'dark');
+            await snap(darkPage, c, '13-dark-home-top');
+
+            await darkPage.click('#cloudflare-header-btn');
+            await darkPage.waitForSelector('#cloudflare-modal-content');
+            await snap(darkPage, c, '14-dark-cloudflare-modal');
+            await darkPage.click('#close-cloudflare-modal-btn');
+
+            await darkPage.click('#reminders-header-btn');
+            await darkPage.waitForSelector('#reminders-modal-content');
+            await snap(darkPage, c, '15-dark-reminders-modal');
+            await darkPage.click('#close-reminders-modal-btn');
+
+            await darkPage.click('#create-new-note-bottom-btn');
+            await darkPage.waitForSelector('#note-editor-container');
+            await darkPage.fill('#note-title-input', `DARK VISUAL QA ${c.name}`);
+            await darkPage.fill('#note-content-textarea', 'ダークモードのスマホ表示を目視確認しています。');
+            await darkPage.fill('#new-task-text-input', 'ダークモードのToDo');
+            await darkPage.click('#add-task-btn');
+            await snap(darkPage, c, '16-dark-editor-todo');
+
+            await darkPage.click('#editor-more-btn');
+            await darkPage.waitForSelector('#editor-more-menu');
+            await snap(darkPage, c, '17-dark-editor-more-menu');
+            await darkPage.click('#editor-more-btn');
+
+            const darkFileInput = darkPage.locator('input[type="file"][multiple]');
+            await darkFileInput.setInputFiles({ name:'qa-dark.png', mimeType:'image/png', buffer:png1x1 });
+            await darkPage.waitForTimeout(250);
+            await darkPage.locator('[title="拡大表示 / 開く"]').first().click();
+            await darkPage.waitForSelector('#attachment-lightbox-overlay');
+            await snap(darkPage, c, '18-dark-attachment-viewer');
+            await darkContext.close();
           }
 
           fs.writeFileSync('complete-mobile-artifacts/findings.json', JSON.stringify({ failureCount: failures.length, failures }, null, 2));
@@ -251,22 +317,30 @@ jobs:
           test -f complete-mobile-artifacts/visual-manifest.json
           for device in iphone-se iphone-15 iphone-max iphone-landscape; do
             for stage in \
-              01-home-top \
-              02-home-bottom \
-              03-cloudflare-modal \
-              04-reminders-modal \
-              05-editor-top \
-              06-editor-saved \
-              07-editor-todo \
-              08-task-more-menu \
-              09-editor-more-menu \
-              10-preview \
-              11-editor-attachment \
-              12-attachment-viewer; do
+              01-light-home-top \
+              02-light-home-bottom \
+              03-light-cloudflare-modal \
+              04-light-reminders-modal \
+              05-light-editor-top \
+              06-light-editor-saved \
+              07-light-editor-todo \
+              08-light-task-more-menu \
+              09-light-editor-more-menu \
+              10-light-preview \
+              11-light-editor-attachment \
+              12-light-attachment-viewer \
+              13-dark-home-top \
+              14-dark-cloudflare-modal \
+              15-dark-reminders-modal \
+              16-dark-editor-todo \
+              17-dark-editor-more-menu \
+              18-dark-attachment-viewer; do
               test -f "complete-mobile-artifacts/${device}/${stage}.png"
             done
           done
-          echo "48 mobile screenshots captured successfully."
+          count=$(find complete-mobile-artifacts -name '*.png' | wc -l | tr -d ' ')
+          test "$count" = "72"
+          echo "72 mobile screenshots captured successfully."
 
       - name: Upload complete mobile evidence
         if: always()
