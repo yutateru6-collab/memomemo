@@ -46,4 +46,4 @@ jobs:
           git commit -m 'feat: integrate encrypted Cloudflare cloud sync'
           git push origin HEAD:${GITHUB_REF_NAME}
 
-# This workflow is temporary and removed before merging to main.
+# Final temporary validation pass; this workflow is removed before merging to main.
