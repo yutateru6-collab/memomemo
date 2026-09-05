@@ -3,6 +3,7 @@ name: Cloudflare Build Compatibility
 on:
   push:
     branches:
+      - main
       - 'chore/cloudflare-*'
   pull_request:
     branches:
