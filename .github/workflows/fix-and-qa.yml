@@ -262,6 +262,8 @@ jobs:
             const { context, page, errors } = await newPage('local-time');
             await page.getByText('iOS Notes へようこそ 📝', { exact: true }).click();
             await page.waitForSelector('#note-editor-container');
+            await page.click('#editor-more-btn');
+            await page.waitForSelector('#editor-more-menu');
             await page.click('#editor-reminder-btn');
             const dueInput = page.locator('#note-editor-container input[type="datetime-local"]').first();
             const dueValue = await dueInput.inputValue();
