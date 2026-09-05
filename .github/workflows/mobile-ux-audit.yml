@@ -1,0 +1,125 @@
+name: Mobile UX Audit
+
+on:
+  push:
+    branches:
+      - 'audit/mobile-ux-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: Install browser QA
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Start app
+        run: |
+          bun run dev > /tmp/memomemo-vite.log 2>&1 &
+          for i in {1..40}; do
+            curl -fsS http://127.0.0.1:3000 >/dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/memomemo-vite.log
+          exit 1
+      - name: Run human-centered mobile audit
+        run: |
+          mkdir -p mobile-ux-artifacts
+          cat > mobile-ux-audit.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+
+          const browser = await chromium.launch({ headless: true });
+          const context = await browser.newContext({
+            viewport: { width: 390, height: 844 },
+            deviceScaleFactor: 3,
+            isMobile: true,
+            hasTouch: true,
+            userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1'
+          });
+          const page = await context.newPage();
+          await page.goto('http://127.0.0.1:3000', { waitUntil: 'networkidle' });
+          await page.waitForSelector('#note-list-container');
+          await page.click('#create-new-note-bottom-btn');
+          await page.waitForSelector('#note-editor-container');
+
+          const data = await page.evaluate(() => {
+            const rect = (el) => {
+              if (!el) return null;
+              const r = el.getBoundingClientRect();
+              return { x:r.x, y:r.y, width:r.width, height:r.height, right:r.right, bottom:r.bottom };
+            };
+            const back = document.querySelector('#editor-back-btn');
+            const header = back?.parentElement || null;
+            const saveButtons = Array.from(document.querySelectorAll('button')).filter((el) => /保存|save/i.test(el.textContent || '') && el.getBoundingClientRect().width > 0);
+            const topIds = ['editor-back-btn','mode-edit-btn','mode-preview-btn','editor-attach-file-btn','editor-reminder-btn','editor-pin-btn','editor-delete-btn'];
+            const topTargets = topIds.map(id => {
+              const el = document.getElementById(id);
+              return { id, box: rect(el), text: el?.textContent?.trim() || '', fontSize: el ? getComputedStyle(el).fontSize : null };
+            });
+            const allVisibleControls = Array.from(document.querySelectorAll('button,input,textarea,select')).filter(el => {
+              const r = el.getBoundingClientRect();
+              const s = getComputedStyle(el);
+              return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+            }).map(el => ({
+              tag: el.tagName,
+              id: el.id || null,
+              type: el.getAttribute('type'),
+              text: (el.textContent || el.getAttribute('placeholder') || '').trim().slice(0,60),
+              width: Math.round(el.getBoundingClientRect().width),
+              height: Math.round(el.getBoundingClientRect().height),
+              fontSize: getComputedStyle(el).fontSize,
+              opacity: getComputedStyle(el).opacity,
+            }));
+            const smallTouchTargets = allVisibleControls.filter(c => c.tag === 'BUTTON' && (c.width < 44 || c.height < 44));
+            const smallFontInputs = allVisibleControls.filter(c => ['INPUT','TEXTAREA','SELECT'].includes(c.tag) && parseFloat(c.fontSize) < 16);
+            return {
+              viewport: { width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth },
+              back: rect(back),
+              header: rect(header),
+              headerPaddingTop: header ? getComputedStyle(header).paddingTop : null,
+              saveButtonCount: saveButtons.length,
+              topTargets,
+              smallTouchTargetCount: smallTouchTargets.length,
+              smallTouchTargets: smallTouchTargets.slice(0,30),
+              smallFontInputCount: smallFontInputs.length,
+              smallFontInputs: smallFontInputs.slice(0,30),
+              textareaFontSize: getComputedStyle(document.querySelector('#note-content-textarea')).fontSize,
+              bodyUserSelect: getComputedStyle(document.body).userSelect,
+            };
+          });
+
+          await page.screenshot({ path: 'mobile-ux-artifacts/editor-mobile.png', fullPage: true });
+          await page.focus('#note-content-textarea');
+          await page.screenshot({ path: 'mobile-ux-artifacts/editor-focused.png', fullPage: true });
+          fs.writeFileSync('mobile-ux-artifacts/metrics.json', JSON.stringify(data, null, 2));
+
+          const sourceFindings = [];
+          const noteEditor = fs.readFileSync('src/components/NoteEditor.tsx','utf8');
+          const noteList = fs.readFileSync('src/components/NoteList.tsx','utf8');
+          if (/opacity-0\s+group-hover:opacity-100/.test(noteEditor)) sourceFindings.push('Touchscreen-inaccessible hover-only control exists in NoteEditor');
+          if (/text-xs/.test(noteList)) sourceFindings.push('Mobile list inputs/controls include text-xs styles; inspect iPhone input auto-zoom risk');
+          if (!/env\(safe-area-inset-top\)/.test(noteEditor)) sourceFindings.push('Editor header has no explicit top safe-area padding');
+          if (!/保存/.test(noteEditor)) sourceFindings.push('Editor exposes no visible Save action or save-state label');
+          fs.writeFileSync('mobile-ux-artifacts/source-findings.json', JSON.stringify(sourceFindings, null, 2));
+          console.log(JSON.stringify({ data, sourceFindings }, null, 2));
+          await browser.close();
+          EOF
+          node mobile-ux-audit.mjs
+      - name: Upload audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-ux-audit
+          path: mobile-ux-artifacts/
