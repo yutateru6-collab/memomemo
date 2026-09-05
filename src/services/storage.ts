@@ -1,6 +1,7 @@
 import { Note, CloudflareSyncConfig } from '../types';
 import { toDateTimeLocalValue } from './dateTime';
 import { parseNotesArray, salvageNotesArray, sortNotesForDisplay } from './noteValidation';
+import { generateSyncCode } from './cloudVault';
 
 const DB_NAME = 'ios_notes_db';
 const DB_VERSION = 1;
@@ -265,25 +266,41 @@ function deleteNoteFromLocalStorage(id: string) {
 const CLOUDFLARE_CONFIG_KEY = 'ios_notes_cloudflare_config';
 
 export const DEFAULT_CF_CONFIG: CloudflareSyncConfig = {
-  workerUrl: '',
+  workerUrl: '/api/sync',
   apiToken: '',
-  kvNamespace: 'NOTES_KV',
-  autoSync: false,
+  kvNamespace: 'MEMOMEMO_KV',
+  syncCode: '',
+  autoSync: true,
   lastSyncTime: null,
   status: 'idle',
   errorMessage: null,
 };
 
 export function getCloudflareConfig(): CloudflareSyncConfig {
+  let config: CloudflareSyncConfig = { ...DEFAULT_CF_CONFIG };
   try {
     const saved = localStorage.getItem(CLOUDFLARE_CONFIG_KEY);
     if (saved) {
-      return { ...DEFAULT_CF_CONFIG, ...JSON.parse(saved) };
+      config = { ...DEFAULT_CF_CONFIG, ...JSON.parse(saved) };
     }
   } catch {
-    // ignore
+    // Keep safe defaults if old config JSON is malformed.
   }
-  return DEFAULT_CF_CONFIG;
+
+  let changed = false;
+  if (!config.workerUrl?.trim()) {
+    config.workerUrl = '/api/sync';
+    changed = true;
+  }
+  if (!config.syncCode) {
+    config.syncCode = generateSyncCode();
+    config.autoSync = true;
+    config.status = 'idle';
+    config.errorMessage = null;
+    changed = true;
+  }
+  if (changed) saveCloudflareConfig(config);
+  return config;
 }
 
 export function saveCloudflareConfig(config: CloudflareSyncConfig): void {
