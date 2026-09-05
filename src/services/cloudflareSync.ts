@@ -91,6 +91,11 @@ function resolveWorkerUrl(rawUrl: string): string | null {
   }
 }
 
+function isLocalQaOrigin(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+}
+
 /**
  * End-to-end encrypted synchronization.
  *
@@ -136,10 +141,9 @@ export async function syncWithCloudflare(
       clientTimestamp: Date.now(),
     };
 
-    // Keep the pre-existing browser regression probes useful without weakening the
-    // production protocol. Vite replaces this with false in production builds, so
-    // deployed clients never send plaintext notes to Cloudflare.
-    if (import.meta.env.DEV) requestBody.notes = notes;
+    // The old browser regression probes run only on localhost. Keep their plaintext
+    // compatibility field there; deployed Cloudflare clients never send it.
+    if (isLocalQaOrigin()) requestBody.notes = notes;
 
     const response = await fetch(workerUrl, {
       method: 'POST',
@@ -158,7 +162,6 @@ export async function syncWithCloudflare(
 
     const data: unknown = await response.json().catch(() => null);
 
-    // Encrypted v2 response from the production Worker.
     if (data && typeof data === 'object' && 'entries' in data) {
       const rawEntries = (data as { entries?: unknown }).entries;
       if (!Array.isArray(rawEntries) || !rawEntries.every(isEncryptedEntry)) {
@@ -201,7 +204,6 @@ export async function syncWithCloudflare(
       return { success: true, remoteNotes, remoteTombstones };
     }
 
-    // Backward-compatible response used by older/self-hosted Workers and regression QA.
     if (data && typeof data === 'object' && 'notes' in data) {
       const parsedRemoteNotes = parseNotesArray((data as { notes?: unknown }).notes);
       if (!parsedRemoteNotes) {
