@@ -1,0 +1,42 @@
+name: Cloudflare Build Compatibility
+
+on:
+  push:
+    branches:
+      - 'chore/cloudflare-*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Cloudflare Bun version
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+
+      - name: Install dependencies exactly as Cloudflare does
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript check
+        run: bun run lint
+
+      - name: Production build
+        run: bun run build
+
+      - name: Validate Worker entry syntax
+        run: node --check worker/index.js
+
+      - name: Validate Wrangler configuration and bundle
+        run: npx --yes wrangler@latest deploy --dry-run
