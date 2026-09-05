@@ -1,0 +1,48 @@
+name: Memomemo Bootstrap Hotfix
+
+on:
+  push:
+    branches:
+      - 'fix/memomemo-data-safety-20260905'
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Apply patch set
+        run: python3 scripts/apply_memomemo_fixes.py
+      - name: Fix nested Worker template syntax
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/services/cloudflareSync.ts')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace("if (authorization !== `Bearer ${env.SYNC_TOKEN}`) {", "if (authorization !== 'Bearer ' + env.SYNC_TOKEN) {")
+          path.write_text(text, encoding='utf-8')
+          PY
+      - run: bun install --frozen-lockfile
+      - name: TypeScript check
+        run: bun run lint
+      - name: Production build
+        run: bun run build
+      - name: Commit bootstrapped fixes
+        run: |
+          if git diff --quiet; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src index.html
+          git commit -m 'fix: protect memo data and sync flows'
+          git push origin HEAD:${GITHUB_REF_NAME}
