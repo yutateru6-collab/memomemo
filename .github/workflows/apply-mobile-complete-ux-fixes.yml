@@ -1,0 +1,36 @@
+name: Apply complete mobile UX fixes
+
+on:
+  push:
+    branches:
+      - fix/mobile-safe-area-complete-20260905
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply audited mobile fixes
+        run: python3 scripts/apply_mobile_complete_ux_fixes.py
+
+      - name: Verify changed source compiles textually
+        run: |
+          grep -q 'home-mobile-header' src/components/NoteList.tsx
+          grep -q -- '--safe-area-top' src/index.css
+          grep -q 'modal-safe-backdrop' src/components/CloudflareModal.tsx
+          grep -q 'modal-safe-backdrop' src/components/RemindersModal.tsx
+          grep -q 'attachment-mobile-header' src/components/AttachmentViewer.tsx
+          grep -q 'task-more-btn' src/components/NoteEditor.tsx
+
+      - name: Commit audited mobile fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src .github/workflows/mobile-complete-ux-audit.yml
+          git commit -m "Fix iPhone safe areas and mobile touch ergonomics"
+          git push origin HEAD:${GITHUB_REF_NAME}
