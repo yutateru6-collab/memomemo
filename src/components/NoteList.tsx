@@ -298,6 +298,9 @@ export const NoteList: React.FC<NoteListProps> = ({
             </button>
           ))}
         </div>
+        <div className="pb-1 text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+          {notes.length} 件のメモ
+        </div>
       </div>
 
       {/* Grouped Note List Content */}
