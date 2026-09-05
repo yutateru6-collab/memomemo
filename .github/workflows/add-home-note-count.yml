@@ -1,0 +1,38 @@
+name: Add home note count
+
+on:
+  push:
+    branches:
+      - fix/home-note-list-and-safe-task-delete-20260905
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add non-fixed memo count above list
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/components/NoteList.tsx')
+          s = p.read_text()
+          old = '''        </div>\n      </div>\n\n      {/* Grouped Note List Content */}'''
+          new = '''        </div>\n        <div className="pb-1 text-[11px] font-medium text-neutral-500 dark:text-neutral-400">\n          {notes.length} 件のメモ\n        </div>\n      </div>\n\n      {/* Grouped Note List Content */}'''
+          if '{notes.length} 件のメモ' not in s:
+              if old not in s:
+                  raise SystemExit('Note list header marker not found')
+              s = s.replace(old, new, 1)
+              p.write_text(s)
+          PY
+      - name: Commit note count
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/NoteList.tsx
+          git commit -m "Keep memo count above the scrollable list"
+          git push origin HEAD:${GITHUB_REF_NAME}
