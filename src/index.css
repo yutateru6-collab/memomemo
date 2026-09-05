@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --ios-bg-grouped: #f2f2f7;
+    --ios-card-bg: #ffffff;
+    --ios-text-primary: #000000;
+    --ios-text-secondary: #8e8e93;
+    --ios-accent: #e49e00; /* iOS Notes classic warm amber/gold */
+    --ios-accent-blue: #007aff;
+    --ios-border: #e5e5ea;
+  }
+
+  .dark {
+    --ios-bg-grouped: #000000;
+    --ios-card-bg: #1c1c1e;
+    --ios-text-primary: #ffffff;
+    --ios-text-secondary: #8e8e93;
+    --ios-accent: #eeb111;
+    --ios-accent-blue: #0a84ff;
+    --ios-border: #2c2c2e;
+  }
+
+  html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    touch-action: manipulation;
+  }
+}
+
+/* iOS Safe Area Padding */
+.pt-safe {
+  padding-top: max(env(safe-area-inset-top), 12px);
+}
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 16px);
+}
+
+/* Custom scrollbar for clean minimal iOS feel */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(142, 142, 147, 0.3);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(142, 142, 147, 0.5);
+}
