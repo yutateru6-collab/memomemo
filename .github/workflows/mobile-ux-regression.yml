@@ -44,7 +44,7 @@ jobs:
       - name: Run phone UX and save-flow checks
         run: |
           mkdir -p mobile-ux-artifacts
-          cat > /tmp/mobile-ux-regression.mjs <<'EOF'
+          cat > mobile-ux-regression.mjs <<'EOF'
           import { chromium } from 'playwright';
           import fs from 'node:fs';
 
@@ -58,8 +58,6 @@ jobs:
           });
           const page = await context.newPage();
           const failures = [];
-
-          const box = async (selector) => await page.locator(selector).boundingBox();
           const fail = (condition, message) => { if (condition) failures.push(message); };
 
           await page.goto('http://127.0.0.1:3000', { waitUntil: 'networkidle' });
@@ -154,7 +152,7 @@ jobs:
           await browser.close();
           if (failures.length) process.exit(1);
           EOF
-          node /tmp/mobile-ux-regression.mjs
+          node mobile-ux-regression.mjs
 
       - name: Upload phone UX evidence
         if: always()
