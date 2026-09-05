@@ -238,6 +238,37 @@ export default function App() {
     scheduleAutoSync();
   };
 
+  // Explicit mobile Save / Back flush. Local persistence is authoritative.
+  // Cloud sync is kicked immediately when configured, but navigation is never blocked by the network.
+  const handleManualSave = useCallback(async (noteId: string): Promise<boolean> => {
+    const currentNote = notesRef.current.find((note) => note.id === noteId);
+    if (!currentNote) return false;
+
+    try {
+      await saveNote(currentNote);
+    } catch (err) {
+      reportStorageError('手動保存', err);
+      return false;
+    }
+
+    if (autoSyncTimer.current) {
+      window.clearTimeout(autoSyncTimer.current);
+      autoSyncTimer.current = null;
+    }
+
+    const currentConfig = cfConfigRef.current;
+    if (
+      navigator.onLine &&
+      currentConfig.autoSync &&
+      currentConfig.syncCode &&
+      currentConfig.workerUrl.trim()
+    ) {
+      void triggerCloudflareSync();
+    }
+
+    return true;
+  }, [reportStorageError, triggerCloudflareSync]);
+
   // Create New Note
   const handleCreateNewNote = () => {
     const newNote: Note = {
@@ -448,6 +479,9 @@ export default function App() {
                   onDeleteNote={handleDeleteNote}
                   onBack={() => setSelectedNoteId(null)}
                   onOpenAttachment={(att) => setActiveAttachment(att)}
+                  onManualSave={() => handleManualSave(selectedNote.id)}
+                  syncStatus={cfConfig.status}
+                  isOnline={isOnline}
                 />
               ) : (
                 <NoteList
@@ -510,6 +544,9 @@ export default function App() {
                       onDeleteNote={handleDeleteNote}
                       onBack={() => setSelectedNoteId(null)}
                       onOpenAttachment={(att) => setActiveAttachment(att)}
+                  onManualSave={() => handleManualSave(selectedNote.id)}
+                  syncStatus={cfConfig.status}
+                  isOnline={isOnline}
                     />
                   ) : (
                     <div className="flex-1 flex flex-col items-center justify-center p-8 text-neutral-400 select-none bg-white dark:bg-[#1c1c1e]">
