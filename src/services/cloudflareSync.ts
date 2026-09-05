@@ -1,4 +1,5 @@
 import { Note, CloudflareSyncConfig } from '../types';
+import { parseNotesArray } from './noteValidation';
 
 /**
  * Cloudflare Workers KV または REST API へのメモ同期クライアント
@@ -33,7 +34,15 @@ export async function syncWithCloudflare(
     }
 
     // POSTでメモ配列とKVキーを同期
-    const response = await fetch(config.workerUrl, {
+    const workerUrl = config.workerUrl.trim();
+    try {
+      const parsedUrl = new URL(workerUrl);
+      if (!['https:', 'http:'].includes(parsedUrl.protocol)) throw new Error('unsupported protocol');
+    } catch {
+      return { success: false, error: 'Cloudflare Worker URLの形式が正しくありません。' };
+    }
+
+    const response = await fetch(workerUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -53,13 +62,22 @@ export async function syncWithCloudflare(
       };
     }
 
-    const data = await response.json().catch(() => null);
+    const data: unknown = await response.json().catch(() => null);
+    if (data && typeof data === 'object' && 'notes' in data) {
+      const parsedRemoteNotes = parseNotesArray((data as { notes?: unknown }).notes);
+      if (!parsedRemoteNotes) {
+        return {
+          success: false,
+          error: '同期先から不正なメモデータが返されました。ローカルの内容は上書きしていません。'
+        };
+      }
+      return { success: true, remoteNotes: parsedRemoteNotes };
+    }
 
-    // サーバー側から新しいメモ一覧が返ってきた場合マージ対応
-    return {
-      success: true,
-      remoteNotes: data?.notes || notes
-    };
+    // A successful Worker may only return { success, count }. In that case do not
+    // feed the submitted snapshot back into React state; doing so can roll back edits
+    // made while the request was in flight.
+    return { success: true };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : '同期中に通信エラーが発生しました';
     return {
@@ -83,7 +101,7 @@ export default {
   async fetch(request, env, ctx) {
     // CORS ヘッダー
     const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };
@@ -93,6 +111,14 @@ export default {
     }
 
     try {
+      // Recommended: set SYNC_TOKEN as a Worker secret and enter the same token in the app.
+      if (env.SYNC_TOKEN) {
+        const authorization = request.headers.get('Authorization') || '';
+        if (authorization !== 'Bearer ' + env.SYNC_TOKEN) {
+          return new Response('Unauthorized', { status: 401, headers: corsHeaders });
+        }
+      }
+
       if (request.method === 'GET') {
         const notes = await env.NOTES_KV.get('user_notes', { type: 'json' }) || [];
         return new Response(JSON.stringify({ notes }), {
@@ -105,7 +131,7 @@ export default {
         if (body.action === 'sync' && Array.isArray(body.notes)) {
           // KV に最新のメモ一覧を保存
           await env.NOTES_KV.put('user_notes', JSON.stringify(body.notes));
-          return new Response(JSON.stringify({ success: true, count: body.notes.length }), {
+          return new Response(JSON.stringify({ success: true, count: body.notes.length, notes: body.notes }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }

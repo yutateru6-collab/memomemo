@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CloudflareSyncConfig, Note } from '../types';
 import { SAMPLE_WORKER_CODE } from '../services/cloudflareSync';
+import { parseNotesArray } from '../services/noteValidation';
 import { X, Cloud, RefreshCw, Check, Copy, AlertCircle, Download, Upload, Server } from 'lucide-react';
 
 interface CloudflareModalProps {
@@ -8,7 +9,7 @@ interface CloudflareModalProps {
   onClose: () => void;
   config: CloudflareSyncConfig;
   onSaveConfig: (config: CloudflareSyncConfig) => void;
-  onTriggerSync: () => Promise<void>;
+  onTriggerSync: (configOverride?: CloudflareSyncConfig) => Promise<void>;
   notes: Note[];
   onImportNotes: (notes: Note[]) => void;
 }
@@ -37,7 +38,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
     onSaveConfig(formData);
     setIsSyncing(true);
     try {
-      await onTriggerSync();
+      await onTriggerSync(formData);
     } finally {
       setIsSyncing(false);
     }
@@ -60,24 +61,33 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
     downloadAnchor.remove();
   };
 
-  // Import local notes JSON
+  // Import local notes JSON. Validate every nested field before touching state/storage.
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const parsed = JSON.parse(event.target?.result as string);
-        if (Array.isArray(parsed)) {
-          onImportNotes(parsed);
-          alert(`${parsed.length} 件のメモをインポートしました。`);
-        } else {
-          alert('不正なメモファイル形式です。');
+        const parsed: unknown = JSON.parse(String(event.target?.result ?? ''));
+        const validatedNotes = parseNotesArray(parsed);
+        if (!validatedNotes) {
+          alert('このJSONはMEMOMEMOの正しいバックアップ形式ではありません。現在のメモは変更していません。');
+          return;
         }
+
+        onImportNotes(validatedNotes);
+        alert(`${validatedNotes.length} 件のメモをインポートしました。`);
       } catch {
-        alert('ファイルの読み込みに失敗しました。');
+        alert('JSONファイルを読み込めませんでした。現在のメモは変更していません。');
+      } finally {
+        input.value = '';
       }
+    };
+    reader.onerror = () => {
+      alert('ファイルの読み込みに失敗しました。現在のメモは変更していません。');
+      input.value = '';
     };
     reader.readAsText(file);
   };
@@ -102,7 +112,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
             <div>
               <h2 className="text-base font-semibold">Cloudflare 同期設定</h2>
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Workers KV を使って複数端末間でメモを安全に同期
+                Workers KV を使って複数端末間でメモを同期
               </p>
             </div>
           </div>
@@ -176,7 +186,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
 
             <div>
               <label className="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
-                API トークン（任意 / 認証保護時）
+                API トークン（推奨 / Worker側で認証設定時）
               </label>
               <input
                 id="cf-api-token-input"
