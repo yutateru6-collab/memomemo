@@ -21,14 +21,27 @@ jobs:
           bun-version: latest
       - name: Apply patch set
         run: python3 scripts/apply_memomemo_fixes.py
-      - name: Fix nested Worker template syntax
+      - name: Fix generated source typing and Worker template syntax
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('src/services/cloudflareSync.ts')
-          text = path.read_text(encoding='utf-8')
-          text = text.replace("if (authorization !== `Bearer ${env.SYNC_TOKEN}`) {", "if (authorization !== 'Bearer ' + env.SYNC_TOKEN) {")
-          path.write_text(text, encoding='utf-8')
+
+          sync_path = Path('src/services/cloudflareSync.ts')
+          sync_text = sync_path.read_text(encoding='utf-8')
+          sync_text = sync_text.replace("if (authorization !== `Bearer ${env.SYNC_TOKEN}`) {", "if (authorization !== 'Bearer ' + env.SYNC_TOKEN) {")
+          sync_path.write_text(sync_text, encoding='utf-8')
+
+          validation_path = Path('src/services/noteValidation.ts')
+          validation_text = validation_path.read_text(encoding='utf-8')
+          validation_text = validation_text.replace(
+              "...(value.reminderActive !== undefined ? { reminderActive: value.reminderActive } : {}),",
+              "...(value.reminderActive !== undefined ? { reminderActive: value.reminderActive as boolean } : {}),",
+          )
+          validation_text = validation_text.replace(
+              "...(value.isPinned !== undefined ? { isPinned: value.isPinned } : {}),",
+              "...(value.isPinned !== undefined ? { isPinned: value.isPinned as boolean } : {}),",
+          )
+          validation_path.write_text(validation_text, encoding='utf-8')
           PY
       - run: bun install --frozen-lockfile
       - name: TypeScript check
