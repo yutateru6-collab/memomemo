@@ -31,9 +31,14 @@ export interface Note {
 }
 
 export interface CloudflareSyncConfig {
+  /** Sync endpoint. Production defaults to the same-origin /api/sync route. */
   workerUrl: string;
+  /** Legacy field retained for existing localStorage migrations. Not used by encrypted sync v2. */
   apiToken: string;
+  /** Legacy field retained for existing localStorage migrations. Binding is configured server-side. */
   kvNamespace: string;
+  /** 256-bit client-side secret. Cloudflare never receives this raw value. */
+  syncCode: string;
   autoSync: boolean;
   lastSyncTime: number | null;
   status: 'idle' | 'syncing' | 'success' | 'error';
