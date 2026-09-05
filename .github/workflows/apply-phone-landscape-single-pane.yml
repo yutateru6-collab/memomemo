@@ -1,0 +1,93 @@
+name: Apply iPhone landscape single-pane fix
+
+on:
+  push:
+    branches:
+      - qa/visual-mobile-screenshots-20260905
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Keep real phones single-pane even in landscape
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/App.tsx')
+          s = path.read_text()
+
+          marker = "import { Smartphone, Monitor, Bell, X, CheckCircle2 } from 'lucide-react';\n\n"
+          helper = """import { Smartphone, Monitor, Bell, X, CheckCircle2 } from 'lucide-react';\n\nconst isPhoneLikeViewportNow = () => {\n  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;\n  const iphoneUserAgent = /iPhone|iPod/i.test(navigator.userAgent);\n  const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;\n  return (iphoneUserAgent || coarsePointer) && Math.min(window.innerWidth, window.innerHeight) <= 500;\n};\n\n"""
+          if 'const isPhoneLikeViewportNow' not in s:
+              if marker not in s:
+                  raise SystemExit('App import marker not found')
+              s = s.replace(marker, helper, 1)
+
+          old = """  const [themeMode, setThemeMode] = useState<ThemeMode>('dark');\n  const [isIPhoneFrame, setIsIPhoneFrame] = useState<boolean>(false);\n"""
+          new = """  const [themeMode, setThemeMode] = useState<ThemeMode>('dark');\n  const [isIPhoneFrame, setIsIPhoneFrame] = useState<boolean>(false);\n  const [isPhoneLikeViewport, setIsPhoneLikeViewport] = useState<boolean>(() => isPhoneLikeViewportNow());\n"""
+          if 'const [isPhoneLikeViewport' not in s:
+              if old not in s:
+                  raise SystemExit('Appearance state marker not found')
+              s = s.replace(old, new, 1)
+
+          online_effect_end = """  }, []);\n\n  // Theme effect\n"""
+          phone_effect = """  }, []);\n\n  // Keep actual phones in single-pane navigation even when landscape width crosses Tailwind's md breakpoint.\n  useEffect(() => {\n    const updatePhoneLayout = () => setIsPhoneLikeViewport(isPhoneLikeViewportNow());\n    updatePhoneLayout();\n    window.addEventListener('resize', updatePhoneLayout);\n    window.addEventListener('orientationchange', updatePhoneLayout);\n    return () => {\n      window.removeEventListener('resize', updatePhoneLayout);\n      window.removeEventListener('orientationchange', updatePhoneLayout);\n    };\n  }, []);\n\n  // Theme effect\n"""
+          if 'updatePhoneLayout' not in s:
+              if online_effect_end not in s:
+                  raise SystemExit('Online effect end marker not found')
+              s = s.replace(online_effect_end, phone_effect, 1)
+
+          old = '      <div className="hidden md:flex w-full max-w-5xl px-4 py-2 items-center justify-between text-xs text-neutral-600 dark:text-neutral-400">'
+          new = '      <div style={{ display: isPhoneLikeViewport ? \'none\' : undefined }} className="hidden md:flex w-full max-w-5xl px-4 py-2 items-center justify-between text-xs text-neutral-600 dark:text-neutral-400">'
+          if 'display: isPhoneLikeViewport' not in s:
+              if old not in s:
+                  raise SystemExit('Desktop top bar marker not found')
+              s = s.replace(old, new, 1)
+
+          old = """          isIPhoneFrame\n            ? 'max-w-[420px] h-[860px] max-h-[92vh] my-2'\n            : 'max-w-5xl h-[100dvh] md:h-[92vh] my-0 md:my-2 px-0 md:px-4'\n"""
+          new = """          isIPhoneFrame\n            ? 'max-w-[420px] h-[860px] max-h-[92vh] my-2'\n            : isPhoneLikeViewport\n            ? 'max-w-5xl h-[100dvh] my-0 px-0'\n            : 'max-w-5xl h-[100dvh] md:h-[92vh] my-0 md:my-2 px-0 md:px-4'\n"""
+          if ': isPhoneLikeViewport\n            ? \'max-w-5xl h-[100dvh] my-0 px-0\'' not in s:
+              if old not in s:
+                  raise SystemExit('Main container marker not found')
+              s = s.replace(old, new, 1)
+
+          old = """            isIPhoneFrame\n              ? 'rounded-[48px] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] border-[10px] border-neutral-800 dark:border-neutral-800 ring-1 ring-neutral-700/50 relative'\n              : 'rounded-none md:rounded-3xl shadow-none md:shadow-xl border-0 md:border border-neutral-300 dark:border-neutral-800'\n"""
+          new = """            isIPhoneFrame\n              ? 'rounded-[48px] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] border-[10px] border-neutral-800 dark:border-neutral-800 ring-1 ring-neutral-700/50 relative'\n              : isPhoneLikeViewport\n              ? 'rounded-none shadow-none border-0'\n              : 'rounded-none md:rounded-3xl shadow-none md:shadow-xl border-0 md:border border-neutral-300 dark:border-neutral-800'\n"""
+          if ": isPhoneLikeViewport\n              ? 'rounded-none shadow-none border-0'" not in s:
+              if old not in s:
+                  raise SystemExit('Chassis marker not found')
+              s = s.replace(old, new, 1)
+
+          old = """            {/* On Small Screens or iPhone Frame: Single view sliding transition */}\n            {isIPhoneFrame ? (\n"""
+          new = """            {/* On actual phones or iPhone Frame: always use single-pane navigation, including landscape. */}\n            {isIPhoneFrame || isPhoneLikeViewport ? (\n"""
+          if '{isIPhoneFrame || isPhoneLikeViewport ? (' not in s:
+              if old not in s:
+                  raise SystemExit('Core navigation marker not found')
+              s = s.replace(old, new, 1)
+
+          path.write_text(s)
+          PY
+
+      - name: TypeScript check
+        run: |
+          bun install --frozen-lockfile
+          bun run lint
+          bun run build
+
+      - name: Commit source-only fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.tsx
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Keep iPhones single-pane in landscape"
+          git push origin HEAD:${GITHUB_REF_NAME}
