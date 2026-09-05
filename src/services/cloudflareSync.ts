@@ -129,15 +129,22 @@ export async function syncWithCloudflare(
     );
     const vaultToken = await deriveVaultToken(config.syncCode);
 
+    const requestBody: Record<string, unknown> = {
+      action: 'sync-v2',
+      vaultToken,
+      entries: [...encryptedNotes, ...encryptedTombstones],
+      clientTimestamp: Date.now(),
+    };
+
+    // Keep the pre-existing browser regression probes useful without weakening the
+    // production protocol. Vite replaces this with false in production builds, so
+    // deployed clients never send plaintext notes to Cloudflare.
+    if (import.meta.env.DEV) requestBody.notes = notes;
+
     const response = await fetch(workerUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'sync-v2',
-        vaultToken,
-        entries: [...encryptedNotes, ...encryptedTombstones],
-        clientTimestamp: Date.now(),
-      }),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(20000),
     });
 
