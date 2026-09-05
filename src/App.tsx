@@ -9,8 +9,8 @@ import {
   DEFAULT_CF_CONFIG,
   saveAllNotes
 } from './services/storage';
-import { syncWithCloudflare } from './services/cloudflareSync';
-import { mergeNotesByFreshness } from './services/noteValidation';
+import { mergeNotesWithCloudState, syncWithCloudflare } from './services/cloudflareSync';
+import { recordNoteDeletion } from './services/cloudVault';
 import { checkReminders } from './services/notifications';
 import { NoteList } from './components/NoteList';
 import { NoteEditor } from './components/NoteEditor';
@@ -152,7 +152,11 @@ export default function App() {
       if (result.remoteNotes) {
         // Never replace local state blindly. If the user edited while the request was
         // in flight, the newest updatedAt/version wins.
-        const mergedNotes = mergeNotesByFreshness(notesRef.current, result.remoteNotes);
+        const mergedNotes = mergeNotesWithCloudState(
+          notesRef.current,
+          result.remoteNotes,
+          result.remoteTombstones || []
+        );
         notesRef.current = mergedNotes;
         setNotes(mergedNotes);
         try {
@@ -185,7 +189,7 @@ export default function App() {
 
   const scheduleAutoSync = useCallback(() => {
     const currentConfig = cfConfigRef.current;
-    if (!currentConfig.autoSync || !currentConfig.workerUrl.trim()) return;
+    if (!currentConfig.autoSync || !currentConfig.syncCode || !currentConfig.workerUrl.trim()) return;
     if (autoSyncTimer.current) window.clearTimeout(autoSyncTimer.current);
     autoSyncTimer.current = window.setTimeout(() => {
       void triggerCloudflareSync();
@@ -197,6 +201,20 @@ export default function App() {
       if (autoSyncTimer.current) window.clearTimeout(autoSyncTimer.current);
     };
   }, []);
+
+  // On the deployed HTTPS app, pull cloud state once after local IndexedDB loads.
+  // Localhost/dev is intentionally excluded so QA and offline development remain deterministic.
+  useEffect(() => {
+    if (!isLoaded || typeof window === 'undefined') return;
+    const currentConfig = cfConfigRef.current;
+    if (!currentConfig.autoSync || !currentConfig.syncCode) return;
+    const hostname = window.location.hostname;
+    if (window.location.protocol !== 'https:' || hostname === 'localhost' || hostname === '127.0.0.1') return;
+    const timer = window.setTimeout(() => {
+      void triggerCloudflareSync();
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [isLoaded, triggerCloudflareSync]);
 
   // Handle Note Save/Update. Keep this outside a React state-updater function so
   // StrictMode cannot run storage/network side effects twice in development.
@@ -242,8 +260,9 @@ export default function App() {
     scheduleAutoSync();
   };
 
-  // Delete Note
+  // Delete Note. Record a versioned tombstone only after local deletion succeeds.
   const handleDeleteNote = async (noteId: string) => {
+    const noteToDelete = notesRef.current.find((note) => note.id === noteId);
     try {
       await deleteNoteStorage(noteId);
     } catch (err) {
@@ -251,6 +270,7 @@ export default function App() {
       return;
     }
 
+    if (noteToDelete) recordNoteDeletion(noteToDelete);
     const nextNotes = notesRef.current.filter((n) => n.id !== noteId);
     notesRef.current = nextNotes;
     setNotes(nextNotes);
