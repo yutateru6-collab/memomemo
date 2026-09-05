@@ -29,7 +29,7 @@ export const AttachmentViewer: React.FC<AttachmentViewerProps> = ({ attachment, 
     >
       {/* Top Bar */}
       <div
-        className="flex items-center justify-between px-4 py-3 bg-neutral-900/90 border-b border-neutral-800"
+        className="attachment-mobile-header flex items-center justify-between gap-2 px-4 py-3 bg-neutral-900/90 border-b border-neutral-800"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 truncate max-w-[70%]">
@@ -49,7 +49,7 @@ export const AttachmentViewer: React.FC<AttachmentViewerProps> = ({ attachment, 
             id="attachment-download-btn"
             type="button"
             onClick={handleDownload}
-            className="flex items-center gap-1 text-xs bg-neutral-800 hover:bg-neutral-700 px-3 py-1.5 rounded-full transition-colors"
+            className="justify-center inline-flex min-h-11 min-w-11 flex items-center gap-1 text-xs bg-neutral-800 hover:bg-neutral-700 px-3 py-1.5 rounded-full transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
             <span>保存</span>
@@ -58,7 +58,7 @@ export const AttachmentViewer: React.FC<AttachmentViewerProps> = ({ attachment, 
             id="attachment-close-btn"
             type="button"
             onClick={onClose}
-            className="p-1 rounded-full hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors"
+            className="justify-center items-center inline-flex min-h-11 min-w-11 p-1 rounded-full hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -67,7 +67,7 @@ export const AttachmentViewer: React.FC<AttachmentViewerProps> = ({ attachment, 
 
       {/* Content area */}
       <div
-        className="flex-1 flex items-center justify-center p-4 overflow-auto"
+        className="attachment-safe-content flex-1 flex items-center justify-center p-4 overflow-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {attachment.type === 'image' ? (
@@ -89,7 +89,7 @@ export const AttachmentViewer: React.FC<AttachmentViewerProps> = ({ attachment, 
                 href={attachment.dataUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-1 text-xs text-amber-400 hover:underline"
+                className="min-h-11 inline-flex items-center gap-1 text-xs text-amber-400 hover:underline"
               >
                 別ウィンドウで開く
                 <ExternalLink className="w-3 h-3" />
@@ -109,7 +109,7 @@ export const AttachmentViewer: React.FC<AttachmentViewerProps> = ({ attachment, 
             <button
               type="button"
               onClick={handleDownload}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 text-black font-semibold text-xs rounded-full"
+              className="min-h-11 inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 text-black font-semibold text-sm rounded-xl"
             >
               <Download className="w-4 h-4" />
               ダウンロードして開く

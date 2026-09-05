@@ -90,12 +90,12 @@ export const RemindersModal: React.FC<RemindersModalProps> = ({
   return (
     <div
       id="reminders-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
+      className="modal-safe-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
       onClick={onClose}
     >
       <div
         id="reminders-modal-content"
-        className="w-full max-w-lg bg-white dark:bg-[#1c1c1e] text-neutral-900 dark:text-neutral-100 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden flex flex-col max-h-[90vh]"
+        className="w-full max-w-lg bg-white dark:bg-[#1c1c1e] text-neutral-900 dark:text-neutral-100 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden flex flex-col max-h-full"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -115,7 +115,7 @@ export const RemindersModal: React.FC<RemindersModalProps> = ({
             id="close-reminders-modal-btn"
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+            className="justify-center items-center inline-flex min-h-11 min-w-11 p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
           >
             <X className="w-5 h-5" />
           </button>
@@ -141,7 +141,7 @@ export const RemindersModal: React.FC<RemindersModalProps> = ({
             <button
               type="button"
               onClick={handleRequestPermission}
-              className="px-3 py-1.5 rounded-full bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold shrink-0 transition-colors shadow-xs"
+              id="enable-notifications-btn" className="min-h-11 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-sm font-semibold shrink-0 transition-colors shadow-xs"
             >
               通知を有効にする
             </button>
@@ -175,8 +175,9 @@ export const RemindersModal: React.FC<RemindersModalProps> = ({
                 <div className="flex items-start gap-2.5">
                   <button
                     type="button"
+                    data-testid="reminder-task-toggle-btn"
                     onClick={() => onToggleTask(note.id, task.id)}
-                    className="mt-0.5 text-neutral-400 hover:text-amber-500 shrink-0 transition-colors"
+                    className="min-w-11 min-h-11 inline-flex items-center justify-center text-neutral-400 hover:text-amber-500 shrink-0 transition-colors"
                   >
                     {task.completed ? (
                       <CheckCircle2 className="w-4 h-4 text-emerald-500" />
@@ -198,7 +199,7 @@ export const RemindersModal: React.FC<RemindersModalProps> = ({
                           onSelectNote(note);
                           onClose();
                         }}
-                        className="inline-flex items-center gap-1 text-neutral-500 hover:text-amber-500 transition-colors"
+                        className="min-h-11 inline-flex items-center gap-1 text-neutral-500 hover:text-amber-500 transition-colors"
                       >
                         <span>📝 {note.title || '無題のメモ'}</span>
                         <ExternalLink className="w-3 h-3" />
@@ -232,7 +233,7 @@ export const RemindersModal: React.FC<RemindersModalProps> = ({
                             setEditingDueDateTaskId(task.id);
                             setTempDueDate(toDateTimeLocalValue(Date.now() + 86400000));
                           }}
-                          className="text-neutral-400 hover:text-amber-500 underline decoration-dotted"
+                          className="min-h-11 inline-flex items-center text-neutral-400 hover:text-amber-500 underline decoration-dotted"
                         >
                           + 期限を設定
                         </button>
@@ -246,19 +247,19 @@ export const RemindersModal: React.FC<RemindersModalProps> = ({
                           type="datetime-local"
                           value={tempDueDate}
                           onChange={(e) => setTempDueDate(e.target.value)}
-                          className="text-xs bg-white dark:bg-neutral-900 px-2 py-1 rounded border border-neutral-300 dark:border-neutral-700"
+                          className="min-h-11 text-base sm:text-xs bg-white dark:bg-neutral-900 px-2 py-1 rounded-lg border border-neutral-300 dark:border-neutral-700"
                         />
                         <button
                           type="button"
                           onClick={() => handleSaveDueDate(note.id, task.id)}
-                          className="text-xs px-2.5 py-1 bg-amber-500 text-black font-semibold rounded"
+                          className="min-h-11 px-3 py-1 bg-amber-500 text-black text-sm font-semibold rounded-lg"
                         >
                           保存
                         </button>
                         <button
                           type="button"
                           onClick={() => setEditingDueDateTaskId(null)}
-                          className="text-xs px-2 py-1 text-neutral-400 hover:text-neutral-200"
+                          className="min-h-11 px-3 py-1 text-sm text-neutral-400 hover:text-neutral-200"
                         >
                           取消
                         </button>

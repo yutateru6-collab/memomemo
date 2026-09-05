@@ -2,6 +2,10 @@
 
 @layer base {
   :root {
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
     --ios-bg-grouped: #f2f2f7;
     --ios-card-bg: #ffffff;
     --ios-text-primary: #000000;
@@ -39,10 +43,45 @@
 
 /* iOS Safe Area Padding */
 .pt-safe {
-  padding-top: max(env(safe-area-inset-top), 12px);
+  padding-top: max(var(--safe-area-top), 12px);
 }
 .pb-safe {
-  padding-bottom: max(env(safe-area-inset-bottom), 16px);
+  padding-bottom: max(var(--safe-area-bottom), 16px);
+}
+
+/* Safe-area-aware layout for real iPhones, including Home Screen/PWA mode. */
+.home-mobile-header {
+  padding-top: max(var(--safe-area-top), 16px);
+  padding-left: max(var(--safe-area-left), 16px);
+  padding-right: max(var(--safe-area-right), 16px);
+}
+
+.safe-horizontal {
+  padding-left: max(var(--safe-area-left), 16px);
+  padding-right: max(var(--safe-area-right), 16px);
+}
+
+.modal-safe-backdrop {
+  padding-top: max(var(--safe-area-top), 16px);
+  padding-right: max(var(--safe-area-right), 16px);
+  padding-bottom: max(var(--safe-area-bottom), 16px);
+  padding-left: max(var(--safe-area-left), 16px);
+}
+
+.attachment-mobile-header {
+  padding-top: max(var(--safe-area-top), 12px);
+  padding-left: max(var(--safe-area-left), 16px);
+  padding-right: max(var(--safe-area-right), 16px);
+}
+
+.attachment-safe-content {
+  padding-right: max(var(--safe-area-right), 16px);
+  padding-bottom: max(var(--safe-area-bottom), 16px);
+  padding-left: max(var(--safe-area-left), 16px);
+}
+
+.in-app-alert-safe {
+  top: max(var(--safe-area-top), 16px);
 }
 
 /* Custom scrollbar for clean minimal iOS feel */
@@ -64,7 +103,9 @@
 /* Mobile editor ergonomics: safe area + keyboard-friendly spacing.
    Touch targets are verified separately by the mobile UX regression workflow. */
 .editor-mobile-header {
-  padding-top: max(env(safe-area-inset-top), 16px);
+  padding-top: max(var(--safe-area-top), 16px);
+  padding-left: max(var(--safe-area-left), 12px);
+  padding-right: max(var(--safe-area-right), 12px);
 }
 
 @media (min-width: 640px) {
@@ -87,5 +128,17 @@
 
   .editor-scroll-content {
     padding-bottom: max(112px, calc(env(safe-area-inset-bottom) + 88px));
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="file"]):not([type="hidden"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  #note-content-textarea {
+    font-size: 16px !important;
   }
 }

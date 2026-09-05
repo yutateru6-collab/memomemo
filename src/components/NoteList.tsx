@@ -115,7 +115,7 @@ export const NoteList: React.FC<NoteListProps> = ({
       className="flex-1 flex flex-col h-full bg-[#f2f2f7] dark:bg-[#000000] overflow-hidden select-none"
     >
       {/* iOS Top Navigation Header */}
-      <div className="pt-3 px-4 pb-2 bg-[#f2f2f7]/80 dark:bg-[#000000]/80 backdrop-blur-md sticky top-0 z-20">
+      <div className="home-mobile-header px-4 pb-2 bg-[#f2f2f7]/80 dark:bg-[#000000]/80 backdrop-blur-md sticky top-0 z-20">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-neutral-900 dark:text-white">
@@ -134,7 +134,7 @@ export const NoteList: React.FC<NoteListProps> = ({
               id="reminders-header-btn"
               type="button"
               onClick={onOpenRemindersModal}
-              className="relative p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors"
+              className="justify-center items-center inline-flex min-h-11 min-w-11 relative p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors"
               title="未完了リマインダー一覧"
             >
               <Bell className="w-5 h-5 text-amber-600 dark:text-amber-400" />
@@ -150,7 +150,7 @@ export const NoteList: React.FC<NoteListProps> = ({
               id="cloudflare-header-btn"
               type="button"
               onClick={onOpenCloudflareModal}
-              className="relative p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors"
+              className="justify-center items-center inline-flex min-h-11 min-w-11 relative p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors"
               title="Cloudflare 同期設定"
             >
               <Cloud className="w-5 h-5 text-neutral-600 dark:text-neutral-400" />
@@ -174,7 +174,7 @@ export const NoteList: React.FC<NoteListProps> = ({
               id="theme-toggle-btn"
               type="button"
               onClick={onToggleTheme}
-              className="p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors"
+              className="justify-center items-center inline-flex min-h-11 min-w-11 p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors"
               title={`外観切り替え (${themeMode === 'dark' ? 'ダーク' : 'ライト'})`}
             >
               {themeMode === 'dark' ? (
@@ -208,14 +208,14 @@ export const NoteList: React.FC<NoteListProps> = ({
             placeholder="検索 (タイトル、内容、タグ、タスク)"
             value={filters.searchQuery}
             onChange={(e) => onUpdateFilters({ ...filters, searchQuery: e.target.value })}
-            className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm bg-neutral-200/80 dark:bg-neutral-800/90 text-neutral-900 dark:text-white placeholder:text-neutral-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all"
+            className="min-h-11 w-full pl-9 pr-8 py-2 text-xs sm:text-sm bg-neutral-200/80 dark:bg-neutral-800/90 text-neutral-900 dark:text-white placeholder:text-neutral-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all"
           />
           {filters.searchQuery && (
             <button
               id="search-clear-btn"
               type="button"
               onClick={() => onUpdateFilters({ ...filters, searchQuery: '' })}
-              className="absolute right-2.5 p-0.5 rounded-full bg-neutral-400 dark:bg-neutral-600 text-white"
+              className="absolute right-0 top-1/2 -translate-y-1/2 min-w-11 min-h-11 inline-flex items-center justify-center rounded-xl text-neutral-400 dark:text-neutral-500"
             >
               <X className="w-3 h-3" />
             </button>
@@ -228,7 +228,7 @@ export const NoteList: React.FC<NoteListProps> = ({
             id="filter-tag-all"
             type="button"
             onClick={() => onUpdateFilters({ ...filters, selectedTag: null })}
-            className={`px-3 py-1 rounded-full whitespace-nowrap font-medium transition-colors ${
+            className={`min-h-11 px-3 py-1 rounded-full whitespace-nowrap font-medium transition-colors ${
               filters.selectedTag === null && !filters.showOnlyPendingTasks && !filters.showOnlyWithAttachments
                 ? 'bg-amber-500 text-black shadow-xs font-semibold'
                 : 'bg-white dark:bg-[#1c1c1e] text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
@@ -247,7 +247,7 @@ export const NoteList: React.FC<NoteListProps> = ({
                 showOnlyPendingTasks: !filters.showOnlyPendingTasks,
               })
             }
-            className={`px-3 py-1 rounded-full whitespace-nowrap font-medium flex items-center gap-1 transition-colors ${
+            className={`min-h-11 px-3 py-1 rounded-full whitespace-nowrap font-medium flex items-center gap-1 transition-colors ${
               filters.showOnlyPendingTasks
                 ? 'bg-amber-500 text-black shadow-xs font-semibold'
                 : 'bg-white dark:bg-[#1c1c1e] text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
@@ -267,7 +267,7 @@ export const NoteList: React.FC<NoteListProps> = ({
                 showOnlyWithAttachments: !filters.showOnlyWithAttachments,
               })
             }
-            className={`px-3 py-1 rounded-full whitespace-nowrap font-medium flex items-center gap-1 transition-colors ${
+            className={`min-h-11 px-3 py-1 rounded-full whitespace-nowrap font-medium flex items-center gap-1 transition-colors ${
               filters.showOnlyWithAttachments
                 ? 'bg-amber-500 text-black shadow-xs font-semibold'
                 : 'bg-white dark:bg-[#1c1c1e] text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
@@ -288,7 +288,7 @@ export const NoteList: React.FC<NoteListProps> = ({
                   selectedTag: filters.selectedTag === tag ? null : tag,
                 })
               }
-              className={`px-3 py-1 rounded-full whitespace-nowrap font-medium transition-colors ${
+              className={`min-h-11 px-3 py-1 rounded-full whitespace-nowrap font-medium transition-colors ${
                 filters.selectedTag === tag
                   ? 'bg-amber-500 text-black shadow-xs font-semibold'
                   : 'bg-white dark:bg-[#1c1c1e] text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
@@ -304,7 +304,7 @@ export const NoteList: React.FC<NoteListProps> = ({
       </div>
 
       {/* Grouped Note List Content */}
-      <div className="flex-1 overflow-y-auto px-4 py-2 pb-safe space-y-4">
+      <div className="safe-horizontal flex-1 overflow-y-auto px-4 py-2 pb-safe space-y-4">
         {filteredNotes.length === 0 ? (
           <div className="text-center py-16 text-neutral-400">
             <p className="text-sm font-medium">一致するメモがありません</p>
@@ -312,7 +312,7 @@ export const NoteList: React.FC<NoteListProps> = ({
             <button
               type="button"
               onClick={onCreateNewNote}
-              className="mt-4 px-4 py-2 rounded-full bg-amber-500 text-black text-xs font-semibold shadow-xs hover:bg-amber-400 transition-colors"
+              className="mt-4 min-h-11 px-4 py-2 rounded-full bg-amber-500 text-black text-sm font-semibold shadow-xs hover:bg-amber-400 transition-colors"
             >
               + 新しいメモを作成
             </button>
