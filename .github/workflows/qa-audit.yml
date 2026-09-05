@@ -1,0 +1,238 @@
+name: Memomemo QA Audit
+
+on:
+  push:
+    branches:
+      - 'qa/memomemo-audit-*'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript check
+        run: bun run lint
+
+      - name: Production build
+        run: bun run build
+
+      - name: Install browser test dependency
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Start Vite app
+        run: |
+          bun run dev > /tmp/memomemo-vite.log 2>&1 &
+          echo $! > /tmp/memomemo-vite.pid
+          for i in {1..40}; do
+            if curl -fsS http://127.0.0.1:3000 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/memomemo-vite.log
+          exit 1
+
+      - name: Browser QA probes
+        run: |
+          mkdir -p qa-artifacts
+          cat > qa-audit.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+
+          const baseURL = 'http://127.0.0.1:3000';
+          const findings = [];
+          const browser = await chromium.launch({ headless: true });
+          const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n8sAAAAASUVORK5CYII=', 'base64');
+
+          async function newPage(name, viewport = { width: 390, height: 844 }) {
+            const context = await browser.newContext({ viewport });
+            const page = await context.newPage();
+            const errors = [];
+            page.on('pageerror', err => errors.push(`pageerror: ${err.message}`));
+            page.on('console', msg => {
+              if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`);
+            });
+            await page.goto(baseURL, { waitUntil: 'networkidle' });
+            await page.waitForSelector('#note-list-container');
+            return { context, page, errors, name };
+          }
+
+          // 1) Baseline smoke on mobile + desktop.
+          {
+            const { context, page, errors } = await newPage('baseline-mobile');
+            await page.screenshot({ path: 'qa-artifacts/baseline-mobile.png', fullPage: true });
+            await page.click('#theme-toggle-btn');
+            await page.click('#reminders-header-btn');
+            await page.waitForSelector('#reminders-modal-content');
+            await page.click('#close-reminders-modal-btn');
+            await page.click('#cloudflare-header-btn');
+            await page.waitForSelector('#cloudflare-modal-content');
+            await page.click('#close-cloudflare-modal-btn');
+            if (errors.length) findings.push({ severity: 'high', probe: 'baseline-mobile', detail: errors.join(' | ') });
+            await context.close();
+          }
+
+          {
+            const { context, page, errors } = await newPage('baseline-desktop', { width: 1440, height: 1000 });
+            await page.click('#create-new-note-bottom-btn');
+            await page.waitForSelector('#note-editor-container');
+            await page.fill('#note-title-input', 'QA smoke note');
+            await page.fill('#note-content-textarea', 'Smoke test content');
+            await page.fill('#new-task-text-input', 'QA task');
+            await page.click('#add-task-btn');
+            await page.click('#mode-preview-btn');
+            await page.waitForSelector('#note-markdown-rendered-view');
+            await page.screenshot({ path: 'qa-artifacts/baseline-desktop.png', fullPage: true });
+            if (errors.length) findings.push({ severity: 'high', probe: 'baseline-desktop', detail: errors.join(' | ') });
+            await context.close();
+          }
+
+          // 2) Multiple attachment probe: both selected files should survive async FileReader callbacks.
+          {
+            const { context, page, errors } = await newPage('multi-attachment', { width: 1280, height: 900 });
+            await page.click('#create-new-note-bottom-btn');
+            await page.waitForSelector('#note-editor-container');
+            const input = page.locator('input[type="file"][multiple]');
+            await input.setInputFiles([
+              { name: 'qa-one.png', mimeType: 'image/png', buffer: png1x1 },
+              { name: 'qa-two.png', mimeType: 'image/png', buffer: png1x1 },
+            ]);
+            await page.waitForTimeout(1200);
+            const attachmentCount = await page.locator('[title="拡大表示 / 開く"]').count();
+            if (attachmentCount !== 2) {
+              findings.push({
+                severity: 'critical',
+                probe: 'multi-attachment',
+                detail: `2 files were selected, but only ${attachmentCount} attachment card(s) remained.`
+              });
+            }
+            if (errors.length) findings.push({ severity: 'high', probe: 'multi-attachment-runtime', detail: errors.join(' | ') });
+            await page.screenshot({ path: 'qa-artifacts/multi-attachment.png', fullPage: true });
+            await context.close();
+          }
+
+          // 3) Manual sync probe: URL entered immediately before Sync should be the URL actually used.
+          {
+            const { context, page, errors } = await newPage('manual-sync');
+            let requestCount = 0;
+            await page.route('https://qa.invalid/sync', async route => {
+              requestCount++;
+              await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, notes: [] }) });
+            });
+            await page.click('#cloudflare-header-btn');
+            await page.fill('#cf-worker-url-input', 'https://qa.invalid/sync');
+            await page.click('#cf-sync-now-btn');
+            await page.waitForTimeout(600);
+            const modalText = await page.locator('#cloudflare-modal-content').innerText();
+            if (requestCount === 0 && modalText.includes('URL')) {
+              findings.push({
+                severity: 'high',
+                probe: 'manual-sync-new-config',
+                detail: 'Clicking “Sync now” immediately after entering a Worker URL used stale parent config; no request reached the newly entered URL.'
+              });
+            }
+            if (errors.length) findings.push({ severity: 'high', probe: 'manual-sync-runtime', detail: errors.join(' | ') });
+            await page.screenshot({ path: 'qa-artifacts/manual-sync.png', fullPage: true });
+            await context.close();
+          }
+
+          // 4) Auto-sync stale-state probe: last edit must be sent and must not be reverted after sync success.
+          {
+            const { context, page, errors } = await newPage('auto-sync', { width: 1280, height: 900 });
+            const capturedBodies = [];
+            await page.route('https://qa.invalid/autosync', async route => {
+              const request = route.request();
+              try { capturedBodies.push(request.postDataJSON()); } catch {}
+              await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, count: 1 }) });
+            });
+            await page.click('#cloudflare-header-btn');
+            await page.fill('#cf-worker-url-input', 'https://qa.invalid/autosync');
+            const autoToggle = page.locator('#cf-auto-sync-toggle');
+            if (!(await autoToggle.isChecked())) await autoToggle.check();
+            await page.click('#cf-save-btn');
+            await page.waitForTimeout(250);
+            await page.click('#close-cloudflare-modal-btn');
+
+            await page.click('#create-new-note-bottom-btn');
+            await page.waitForSelector('#note-editor-container');
+            await page.fill('#note-title-input', 'FINAL AUTOSYNC TITLE');
+            await page.waitForTimeout(3800);
+
+            const sentFinal = capturedBodies.some(body => Array.isArray(body?.notes) && body.notes.some(n => n?.title === 'FINAL AUTOSYNC TITLE'));
+            const currentTitle = await page.locator('#note-title-input').inputValue();
+            if (!sentFinal) {
+              findings.push({
+                severity: 'critical',
+                probe: 'auto-sync-stale-payload',
+                detail: 'The debounced auto-sync request did not contain the latest title edit.'
+              });
+            }
+            if (currentTitle !== 'FINAL AUTOSYNC TITLE') {
+              findings.push({
+                severity: 'critical',
+                probe: 'auto-sync-reverts-local-edit',
+                detail: `After sync success the visible title reverted to “${currentTitle}”.`
+              });
+            }
+            if (errors.length) findings.push({ severity: 'high', probe: 'auto-sync-runtime', detail: errors.join(' | ') });
+            await page.screenshot({ path: 'qa-artifacts/auto-sync.png', fullPage: true });
+            await context.close();
+          }
+
+          // 5) Malformed backup probe: an array alone is insufficient validation; bad entries must not crash the app.
+          {
+            const { context, page, errors } = await newPage('malformed-import');
+            page.on('dialog', async dialog => { await dialog.accept(); });
+            await page.click('#cloudflare-header-btn');
+            const importInput = page.locator('input[type="file"][accept=".json"]');
+            await importInput.setInputFiles({
+              name: 'malformed-notes.json',
+              mimeType: 'application/json',
+              buffer: Buffer.from('[{}]')
+            });
+            await page.waitForTimeout(900);
+            const appAlive = await page.locator('#note-list-container').count();
+            if (errors.length || appAlive === 0) {
+              findings.push({
+                severity: 'critical',
+                probe: 'malformed-import',
+                detail: `Malformed JSON array was accepted and destabilized the app. ${errors.join(' | ')}`
+              });
+            }
+            await page.screenshot({ path: 'qa-artifacts/malformed-import.png', fullPage: true }).catch(() => {});
+            await context.close();
+          }
+
+          await browser.close();
+          fs.writeFileSync('qa-artifacts/findings.json', JSON.stringify(findings, null, 2));
+          console.log(JSON.stringify({ findingCount: findings.length, findings }, null, 2));
+          if (findings.length > 0) process.exit(1);
+          EOF
+          node qa-audit.mjs
+
+      - name: Print Vite log
+        if: always()
+        run: cat /tmp/memomemo-vite.log || true
+
+      - name: Upload QA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memomemo-qa-artifacts
+          path: qa-artifacts/
+          if-no-files-found: warn
