@@ -19,6 +19,13 @@ import { RemindersModal } from './components/RemindersModal';
 import { AttachmentViewer } from './components/AttachmentViewer';
 import { Smartphone, Monitor, Bell, X, CheckCircle2 } from 'lucide-react';
 
+const isPhoneLikeViewportNow = () => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const iphoneUserAgent = /iPhone|iPod/i.test(navigator.userAgent);
+  const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  return (iphoneUserAgent || coarsePointer) && Math.min(window.innerWidth, window.innerHeight) <= 500;
+};
+
 export default function App() {
   // State
   const [notes, setNotes] = useState<Note[]>([]);
@@ -31,6 +38,7 @@ export default function App() {
   // Appearance & Frame
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
   const [isIPhoneFrame, setIsIPhoneFrame] = useState<boolean>(false);
+  const [isPhoneLikeViewport, setIsPhoneLikeViewport] = useState<boolean>(() => isPhoneLikeViewportNow());
 
   // Filters
   const [filters, setFilters] = useState<FilterState>({
@@ -60,6 +68,18 @@ export default function App() {
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Keep actual phones in single-pane navigation even when landscape width crosses Tailwind's md breakpoint.
+  useEffect(() => {
+    const updatePhoneLayout = () => setIsPhoneLikeViewport(isPhoneLikeViewportNow());
+    updatePhoneLayout();
+    window.addEventListener('resize', updatePhoneLayout);
+    window.addEventListener('orientationchange', updatePhoneLayout);
+    return () => {
+      window.removeEventListener('resize', updatePhoneLayout);
+      window.removeEventListener('orientationchange', updatePhoneLayout);
     };
   }, []);
 
@@ -375,7 +395,7 @@ export default function App() {
   return (
     <div className="min-h-[100dvh] w-full bg-neutral-200 dark:bg-neutral-950 flex flex-col items-center justify-center relative font-sans transition-colors duration-200">
       {/* Top Floating Control Bar (Desktop Mode Switcher & Guide) */}
-      <div className="hidden md:flex w-full max-w-5xl px-4 py-2 items-center justify-between text-xs text-neutral-600 dark:text-neutral-400">
+      <div style={{ display: isPhoneLikeViewport ? 'none' : undefined }} className="hidden md:flex w-full max-w-5xl px-4 py-2 items-center justify-between text-xs text-neutral-600 dark:text-neutral-400">
         <div className="flex items-center gap-2">
           <span className="font-semibold text-neutral-800 dark:text-neutral-200">
             iOS Notes (日本語版)
@@ -441,6 +461,8 @@ export default function App() {
         className={`w-full transition-all duration-300 flex justify-center ${
           isIPhoneFrame
             ? 'max-w-[420px] h-[860px] max-h-[92vh] my-2'
+            : isPhoneLikeViewport
+            ? 'max-w-5xl h-[100dvh] my-0 px-0'
             : 'max-w-5xl h-[100dvh] md:h-[92vh] my-0 md:my-2 px-0 md:px-4'
         }`}
       >
@@ -449,6 +471,8 @@ export default function App() {
           className={`w-full h-full flex flex-col overflow-hidden bg-white dark:bg-[#000000] text-neutral-900 dark:text-neutral-100 ${
             isIPhoneFrame
               ? 'rounded-[48px] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] border-[10px] border-neutral-800 dark:border-neutral-800 ring-1 ring-neutral-700/50 relative'
+              : isPhoneLikeViewport
+              ? 'rounded-none shadow-none border-0'
               : 'rounded-none md:rounded-3xl shadow-none md:shadow-xl border-0 md:border border-neutral-300 dark:border-neutral-800'
           }`}
         >
@@ -468,8 +492,8 @@ export default function App() {
 
           {/* Core App Views: Fluid iOS Navigation */}
           <div className="flex-1 flex overflow-hidden relative">
-            {/* On Small Screens or iPhone Frame: Single view sliding transition */}
-            {isIPhoneFrame ? (
+            {/* On actual phones or iPhone Frame: always use single-pane navigation, including landscape. */}
+            {isIPhoneFrame || isPhoneLikeViewport ? (
               // Mobile View inside Frame: Slide between List and Editor
               selectedNote ? (
                 <NoteEditor
