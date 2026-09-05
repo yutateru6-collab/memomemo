@@ -90,6 +90,8 @@ async function handleSync(request, env) {
   }
 
   const prefix = await vaultPrefix(vaultToken);
+  const resolvedIncoming = new Map();
+
   for (const entry of incoming) {
     const storageKey = prefix + entry.key;
     let existing = null;
@@ -98,14 +100,24 @@ async function handleSync(request, env) {
     } catch {
       existing = null;
     }
-    const winner = pickNewer(existing, entry);
+
+    const winner = pickNewer(isValidEntry(existing) ? existing : null, entry);
+    resolvedIncoming.set(entry.key, winner);
     if (winner === entry) {
       await env.MEMOMEMO_KV.put(storageKey, JSON.stringify(entry));
     }
   }
 
-  const entries = await listAllEntries(env.MEMOMEMO_KV, prefix);
-  return json({ success: true, entries, serverTime: Date.now() });
+  // KV's global listing/read path is eventually consistent. Overlay every winner we
+  // just resolved so the response cannot temporarily omit or roll back this request's
+  // accepted write while propagation catches up.
+  const listed = await listAllEntries(env.MEMOMEMO_KV, prefix);
+  const responseByKey = new Map(listed.map((entry) => [entry.key, entry]));
+  for (const [key, entry] of resolvedIncoming) {
+    responseByKey.set(key, pickNewer(responseByKey.get(key), entry));
+  }
+
+  return json({ success: true, entries: Array.from(responseByKey.values()), serverTime: Date.now() });
 }
 
 export default {
