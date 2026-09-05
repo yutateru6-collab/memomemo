@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Tailwind v4 defaults dark: utilities to the OS color scheme. MEMOMEMO has its own
+   light/dark switch, so bind dark: to the .dark class that App.tsx controls. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer base {
   :root {
     --safe-area-top: env(safe-area-inset-top, 0px);
