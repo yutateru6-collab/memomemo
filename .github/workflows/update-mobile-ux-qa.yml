@@ -58,3 +58,5 @@ jobs:
           git add -A
           git commit -m "Update regression QA for mobile More menu"
           git push origin HEAD:${GITHUB_REF_NAME}
+
+# trigger after workflow exists on branch
