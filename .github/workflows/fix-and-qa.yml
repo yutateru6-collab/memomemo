@@ -194,6 +194,9 @@ jobs:
           // 7) A stale remote response must not overwrite a newer local note.
           {
             const { context, page, errors } = await newPage('stale-remote', { width: 1280, height: 900 });
+            await page.route('http://127.0.0.1:3000/api/sync', async route => {
+              await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, entries: [] }) });
+            });
             await page.route('https://qa.invalid/stale', async route => {
               const body = route.request().postDataJSON();
               const notes = structuredClone(body?.notes ?? []);
