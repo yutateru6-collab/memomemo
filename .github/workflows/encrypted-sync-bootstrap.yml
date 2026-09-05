@@ -33,15 +33,15 @@ jobs:
         run: bun run build
       - name: Worker syntax check
         run: node --check worker/index.js
-      - name: Commit validated integration
+      - name: Commit validated source integration
         run: |
           set -euo pipefail
-          if git diff --quiet; then
-            echo 'No integration changes to commit.'
+          if git diff --quiet -- src/App.tsx src/services/storage.ts; then
+            echo 'No source integration changes to commit.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/App.tsx src/services/storage.ts .github/workflows/fix-and-qa.yml
+          git add src/App.tsx src/services/storage.ts
           git commit -m 'feat: integrate encrypted Cloudflare cloud sync'
           git push origin HEAD:${GITHUB_REF_NAME}
