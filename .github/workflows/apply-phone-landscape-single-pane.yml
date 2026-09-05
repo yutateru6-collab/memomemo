@@ -15,6 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+
       - name: Keep real phones single-pane even in landscape
         run: |
           python3 - <<'PY'
