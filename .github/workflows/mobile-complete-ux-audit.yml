@@ -1,0 +1,194 @@
+name: Mobile Complete UX Audit
+
+on:
+  push:
+    branches:
+      - main
+      - fix/mobile-safe-area-complete-20260905
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  mobile-complete-ux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run build
+
+      - name: Install browser QA
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Start app
+        run: |
+          bun run dev > /tmp/memomemo-complete-mobile.log 2>&1 &
+          for i in {1..40}; do
+            curl -fsS http://127.0.0.1:3000 >/dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/memomemo-complete-mobile.log
+          exit 1
+
+      - name: Audit safe areas, touch targets, overflow and destructive flows
+        run: |
+          mkdir -p complete-mobile-artifacts
+          cat > complete-mobile-audit.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+
+          const browser = await chromium.launch({ headless: true });
+          const cases = [
+            { name: 'iphone-se', width: 375, height: 667, top: 47, bottom: 20, left: 0, right: 0 },
+            { name: 'iphone-15', width: 390, height: 844, top: 59, bottom: 34, left: 0, right: 0 },
+            { name: 'iphone-max', width: 430, height: 932, top: 59, bottom: 34, left: 0, right: 0 },
+            { name: 'iphone-landscape', width: 844, height: 390, top: 0, bottom: 21, left: 59, right: 59 },
+          ];
+          const failures = [];
+          const addFailure = (caseName, message) => failures.push(`${caseName}: ${message}`);
+          const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n8sAAAAASUVORK5CYII=', 'base64');
+
+          async function makePage(c) {
+            const context = await browser.newContext({
+              viewport: { width: c.width, height: c.height },
+              deviceScaleFactor: 3,
+              isMobile: true,
+              hasTouch: true,
+              userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+            });
+            const page = await context.newPage();
+            await page.goto('http://127.0.0.1:3000', { waitUntil: 'networkidle' });
+            await page.waitForSelector('#note-list-container');
+            await page.addStyleTag({ content: `:root{--safe-area-top:${c.top}px !important;--safe-area-bottom:${c.bottom}px !important;--safe-area-left:${c.left}px !important;--safe-area-right:${c.right}px !important;}` });
+            return { context, page };
+          }
+
+          async function rect(page, selector) {
+            return page.locator(selector).evaluate((el) => {
+              const r = el.getBoundingClientRect();
+              return { x:r.x, y:r.y, width:r.width, height:r.height, right:r.right, bottom:r.bottom };
+            });
+          }
+
+          async function assertTouch(page, c, selector, label) {
+            if (!(await page.locator(selector).count())) {
+              addFailure(c.name, `${label} is missing`);
+              return;
+            }
+            const r = await rect(page, selector);
+            if (r.height < 44) addFailure(c.name, `${label} is only ${r.height.toFixed(1)}px high`);
+            if (r.width < 44) addFailure(c.name, `${label} is only ${r.width.toFixed(1)}px wide`);
+          }
+
+          for (const c of cases) {
+            const { context, page } = await makePage(c);
+            const homeTitle = await page.getByRole('heading', { name: 'メモ', exact: true }).boundingBox();
+            if (!homeTitle) addFailure(c.name, 'home title missing');
+            if (homeTitle && homeTitle.y < c.top) addFailure(c.name, `home title enters status-bar safe area: y=${homeTitle.y.toFixed(1)}, safeTop=${c.top}`);
+
+            const bodyMetrics = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth }));
+            if (bodyMetrics.sw > bodyMetrics.iw + 1) addFailure(c.name, `home horizontal overflow ${bodyMetrics.sw}px > ${bodyMetrics.iw}px`);
+
+            for (const [selector, label] of [
+              ['#reminders-header-btn','reminder header button'],
+              ['#cloudflare-header-btn','cloud header button'],
+              ['#theme-toggle-btn','theme button'],
+              ['#create-new-note-bottom-btn','new memo button'],
+              ['#notes-search-input','search field'],
+              ['#filter-tag-all','all filter'],
+              ['#filter-pending-tasks','pending filter'],
+              ['#filter-has-attachments','attachment filter'],
+            ]) await assertTouch(page, c, selector, label);
+
+            const createRect = await rect(page, '#create-new-note-bottom-btn');
+            const searchRect = await rect(page, '#notes-search-input');
+            if (createRect.y > searchRect.y) addFailure(c.name, 'new memo action is not above search');
+            if (createRect.x < c.left) addFailure(c.name, `new memo action enters left safe area: x=${createRect.x}`);
+            if (createRect.right > c.width - c.right + 0.5) addFailure(c.name, `new memo action enters right safe area: right=${createRect.right}`);
+
+            // Editor safe area + save flow + task safety.
+            await page.click('#create-new-note-bottom-btn');
+            await page.waitForSelector('#note-editor-container');
+            await page.fill('#note-title-input', `FULL UX ${c.name}`);
+            const editorBack = await rect(page, '#editor-back-btn');
+            if (editorBack.y < c.top) addFailure(c.name, `editor back button enters top safe area: y=${editorBack.y}`);
+            for (const [selector, label] of [
+              ['#editor-back-btn','editor back'], ['#editor-save-btn','editor save'], ['#editor-more-btn','editor more'],
+              ['#mode-edit-btn','edit mode'], ['#mode-preview-btn','preview mode'], ['#new-task-text-input','new task field'], ['#add-task-btn','add task'],
+            ]) await assertTouch(page, c, selector, label);
+
+            const editorMetrics = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth }));
+            if (editorMetrics.sw > editorMetrics.iw + 1) addFailure(c.name, `editor horizontal overflow ${editorMetrics.sw}px > ${editorMetrics.iw}px`);
+
+            await page.fill('#new-task-text-input', '削除安全性チェック');
+            await page.click('#add-task-btn');
+            const unsafeTaskX = page.locator('button[aria-label="タスクを削除"], button[title="タスクを削除"]');
+            if (await unsafeTaskX.count()) addFailure(c.name, 'task still exposes a direct one-tap delete button');
+            const taskMore = page.locator('[data-testid="task-more-btn"]').first();
+            if (!(await taskMore.count())) addFailure(c.name, 'task More button missing');
+            else {
+              const tr = await taskMore.evaluate((el) => { const r=el.getBoundingClientRect(); return {width:r.width,height:r.height}; });
+              if (tr.width < 44 || tr.height < 44) addFailure(c.name, `task More target is ${tr.width}x${tr.height}`);
+            }
+
+            // Cloud modal must remain inside simulated safe area and expose a 44px close target.
+            await page.click('#editor-back-btn');
+            await page.waitForSelector('#note-list-container');
+            await page.click('#cloudflare-header-btn');
+            await page.waitForSelector('#cloudflare-modal-content');
+            const cloudRect = await rect(page, '#cloudflare-modal-content');
+            if (cloudRect.y < c.top) addFailure(c.name, `cloud modal enters top safe area: y=${cloudRect.y}`);
+            if (cloudRect.bottom > c.height - c.bottom + 0.5) addFailure(c.name, `cloud modal enters bottom safe area: bottom=${cloudRect.bottom}`);
+            await assertTouch(page, c, '#close-cloudflare-modal-btn', 'cloud modal close');
+            await page.click('#close-cloudflare-modal-btn');
+
+            // Reminders modal safe area.
+            await page.click('#reminders-header-btn');
+            await page.waitForSelector('#reminders-modal-content');
+            const reminderRect = await rect(page, '#reminders-modal-content');
+            if (reminderRect.y < c.top) addFailure(c.name, `reminder modal enters top safe area: y=${reminderRect.y}`);
+            if (reminderRect.bottom > c.height - c.bottom + 0.5) addFailure(c.name, `reminder modal enters bottom safe area: bottom=${reminderRect.bottom}`);
+            await assertTouch(page, c, '#close-reminders-modal-btn', 'reminder modal close');
+            await page.click('#close-reminders-modal-btn');
+
+            // Attachment viewer safe area + controls.
+            await page.click('#create-new-note-bottom-btn');
+            await page.waitForSelector('#note-editor-container');
+            const fileInput = page.locator('input[type="file"][multiple]');
+            await fileInput.setInputFiles({ name:'qa-safe.png', mimeType:'image/png', buffer:png1x1 });
+            await page.waitForTimeout(250);
+            await page.locator('[title="拡大表示 / 開く"]').first().click();
+            await page.waitForSelector('#attachment-lightbox-overlay');
+            await assertTouch(page, c, '#attachment-close-btn', 'attachment close');
+            await assertTouch(page, c, '#attachment-download-btn', 'attachment save');
+            const attachmentClose = await rect(page, '#attachment-close-btn');
+            if (attachmentClose.y < c.top) addFailure(c.name, `attachment controls enter top safe area: y=${attachmentClose.y}`);
+            await page.screenshot({ path:`complete-mobile-artifacts/${c.name}.png`, fullPage:true });
+            await context.close();
+          }
+
+          fs.writeFileSync('complete-mobile-artifacts/findings.json', JSON.stringify(failures, null, 2));
+          console.log(JSON.stringify({ failureCount: failures.length, failures }, null, 2));
+          await browser.close();
+          if (failures.length) process.exit(1);
+          EOF
+          node complete-mobile-audit.mjs
+
+      - name: Upload complete mobile evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-complete-ux-audit
+          path: complete-mobile-artifacts/

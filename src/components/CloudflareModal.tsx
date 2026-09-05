@@ -136,7 +136,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
   return (
     <div
       id="cloudflare-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
+      className="modal-safe-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
       onClick={onClose}
     >
       <div
@@ -144,7 +144,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="cloud-sync-title"
-        className="w-full max-w-lg bg-white dark:bg-[#1c1c1e] text-neutral-900 dark:text-neutral-100 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden flex flex-col max-h-[90vh]"
+        className="w-full max-w-lg bg-white dark:bg-[#1c1c1e] text-neutral-900 dark:text-neutral-100 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden flex flex-col max-h-full"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-200 dark:border-neutral-800">
@@ -164,7 +164,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
             type="button"
             aria-label="クラウド同期設定を閉じる"
             onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+            className="justify-center items-center inline-flex min-h-11 min-w-11 p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
           >
             <X className="w-5 h-5" />
           </button>
@@ -217,7 +217,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
               <button
                 type="button"
                 onClick={handleGenerateCode}
-                className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline"
+                className="min-h-11 px-2 -my-2 inline-flex items-center text-[11px] text-amber-600 dark:text-amber-400 hover:underline"
               >
                 {formData.syncCode ? '新しいコードを作る' : '同期コードを作る'}
               </button>
@@ -232,13 +232,13 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
                   placeholder="別端末の同期コードを貼り付け"
                   value={formData.syncCode}
                   onChange={(e) => setFormData({ ...formData, syncCode: e.target.value.trim(), status: 'idle', errorMessage: null })}
-                  className="w-full pr-10 pl-3 py-2 text-xs font-mono rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-300 dark:border-neutral-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className="min-h-11 w-full pr-10 pl-3 py-2 text-xs font-mono rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-300 dark:border-neutral-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
                 />
                 <button
                   type="button"
                   aria-label={showSyncCode ? '同期コードを隠す' : '同期コードを表示'}
                   onClick={() => setShowSyncCode((value) => !value)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400"
+                  className="absolute right-0 top-1/2 -translate-y-1/2 min-w-11 min-h-11 inline-flex items-center justify-center text-neutral-400"
                 >
                   {showSyncCode ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 </button>
@@ -248,7 +248,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
                 type="button"
                 disabled={!syncCodeIsValid}
                 onClick={handleCopyCode}
-                className="px-3 rounded-xl border border-neutral-300 dark:border-neutral-700 disabled:opacity-40"
+                className="justify-center items-center inline-flex min-h-11 min-w-11 px-3 rounded-xl border border-neutral-300 dark:border-neutral-700 disabled:opacity-40"
                 title="同期コードをコピー"
               >
                 {copiedCode ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
@@ -270,12 +270,12 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
                 placeholder="/api/sync"
                 value={formData.workerUrl}
                 onChange={(e) => setFormData({ ...formData, workerUrl: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-300 dark:border-neutral-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                className="min-h-11 w-full px-3 py-2 text-xs rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-300 dark:border-neutral-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
               <p className="mt-1 text-[10px] text-neutral-400">通常は /api/sync のままで変更不要です。</p>
             </div>
 
-            <div className="flex items-center justify-between pt-1">
+            <div className="min-h-11 flex items-center justify-between gap-3 pt-1">
               <div>
                 <span className="text-xs font-medium">変更時の自動クラウド保存</span>
                 <p className="text-[11px] text-neutral-500">編集から約3秒後に暗号化して同期します</p>
@@ -285,7 +285,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
                 type="checkbox"
                 checked={formData.autoSync}
                 onChange={(e) => setFormData({ ...formData, autoSync: e.target.checked })}
-                className="w-4 h-4 rounded accent-amber-500"
+                className="w-6 h-6 rounded accent-amber-500"
               />
             </div>
           </div>
@@ -295,7 +295,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
               id="cf-save-btn"
               type="button"
               onClick={handleSave}
-              className="flex-1 py-2 px-3 text-xs font-medium rounded-xl bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-colors"
+              className="min-h-11 flex-1 py-2 px-3 text-xs font-medium rounded-xl bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-colors"
             >
               設定を保存
             </button>
@@ -304,7 +304,7 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
               type="button"
               disabled={isSyncing || !syncCodeIsValid}
               onClick={handleManualSync}
-              className="flex-1 py-2 px-3 text-xs font-semibold rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+              className="min-h-11 flex-1 py-2 px-3 text-xs font-semibold rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black flex items-center justify-center gap-1.5 transition-colors shadow-xs"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
               今すぐ同期
@@ -319,12 +319,12 @@ export const CloudflareModal: React.FC<CloudflareModalProps> = ({
               <button
                 type="button"
                 onClick={handleExportJSON}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 px-3 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+                className="flex-1 min-h-11 inline-flex items-center justify-center gap-1.5 py-1.5 px-3 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
               >
                 <Download className="w-3.5 h-3.5 text-neutral-500" />
                 JSON保存
               </button>
-              <label className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 px-3 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer transition-colors">
+              <label className="flex-1 min-h-11 inline-flex items-center justify-center gap-1.5 py-1.5 px-3 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer transition-colors">
                 <Upload className="w-3.5 h-3.5 text-neutral-500" />
                 JSONから復元
                 <input type="file" accept=".json" onChange={handleImportJSON} className="hidden" />

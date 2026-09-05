@@ -246,6 +246,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
   // Delete Attachment
   const handleDeleteAttachment = (attId: string) => {
+    if (!confirm('この添付ファイルを削除しますか？')) return;
     onUpdateNote({
       ...note,
       attachments: note.attachments.filter((a) => a.id !== attId),
@@ -443,7 +444,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
       <div
         id="editor-save-status"
-        className="px-4 sm:px-6 py-1.5 flex items-center gap-2 border-b border-neutral-100 dark:border-neutral-800 bg-white/90 dark:bg-[#1c1c1e]/90 text-[11px] text-neutral-500 dark:text-neutral-400"
+        className="safe-horizontal px-4 sm:px-6 py-1.5 flex items-center gap-2 border-b border-neutral-100 dark:border-neutral-800 bg-white/90 dark:bg-[#1c1c1e]/90 text-[11px] text-neutral-500 dark:text-neutral-400"
       >
         <span className={saveState === 'error' ? 'text-rose-500' : ''}>{localSaveLabel}</span>
         <span>•</span>
@@ -452,7 +453,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
       {/* Reminder Setting Drawer / Banner */}
       {showReminderSetting && (
-        <div className="px-4 py-3 bg-amber-50/70 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-900/40 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="safe-horizontal px-4 py-3 bg-amber-50/70 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-900/40 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-amber-500" />
             <span className="font-medium text-amber-900 dark:text-amber-200">
@@ -484,7 +485,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                     updatedAt: Date.now(),
                   })
                 }
-                className="text-neutral-500 hover:text-rose-500"
+                className="min-h-11 px-2 inline-flex items-center text-neutral-500 hover:text-rose-500"
               >
                 クリア
               </button>
@@ -492,7 +493,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             <button
               type="button"
               onClick={() => setShowReminderSetting(false)}
-              className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+              className="min-w-11 min-h-11 inline-flex items-center justify-center text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
             >
               <X className="w-4 h-4" />
             </button>
@@ -501,7 +502,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       )}
 
       {/* Main Scrollable Content */}
-      <div className="editor-scroll-content flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
+      <div className="editor-scroll-content safe-horizontal flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
         {/* Title Input */}
         <div>
           <input
@@ -551,13 +552,13 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                     handleAddTag(newTagInput);
                   }
                 }}
-                className="text-xs px-2 py-0.5 rounded-full bg-white dark:bg-neutral-800 border border-amber-500 outline-none w-24"
+                className="min-h-11 text-base sm:text-xs px-2 py-1 rounded-xl bg-white dark:bg-neutral-800 border border-amber-500 outline-none w-28"
                 autoFocus
               />
               <button
                 type="button"
                 onClick={() => handleAddTag(newTagInput)}
-                className="text-xs px-2 py-0.5 rounded-full bg-amber-500 text-black font-semibold"
+                className="min-h-11 px-3 py-1 rounded-xl bg-amber-500 text-black text-sm font-semibold"
               >
                 追加
               </button>
@@ -643,8 +644,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                   <div className="flex items-center gap-2.5 flex-1 min-w-0">
                     <button
                       type="button"
+                      data-testid="task-toggle-complete-btn"
+                      aria-label={`${task.text} を${task.completed ? '未完了' : '完了'}にする`}
                       onClick={() => handleToggleTask(task.id)}
-                      className="text-neutral-400 hover:text-amber-500 transition-colors shrink-0"
+                      className="min-w-11 min-h-11 inline-flex items-center justify-center text-neutral-400 hover:text-amber-500 transition-colors shrink-0"
                     >
                       {task.completed ? (
                         <CheckCircle2 className="w-4 h-4 text-emerald-500" />
@@ -671,7 +674,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                         type="datetime-local"
                         value={task.dueDate || ''}
                         onChange={(e) => handleTaskDueDateChange(task.id, e.target.value)}
-                        className="text-[11px] bg-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 outline-none w-28 cursor-pointer"
+                        className="min-h-11 text-[11px] bg-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 outline-none w-28 cursor-pointer"
                         title="タスクの期日を設定"
                       />
                     </div>
@@ -679,6 +682,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                     <div className="relative">
                       <button
                         id={`task-more-btn-${task.id}`}
+                        data-testid="task-more-btn"
                         type="button"
                         aria-label={`${task.text} のその他の操作`}
                         aria-expanded={openTaskMenuId === task.id}
@@ -714,28 +718,28 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
 
           {/* Add New Task Form: stacked on phones so controls never get squeezed off-screen */}
-          <form onSubmit={handleAddTask} className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1">
+          <form onSubmit={handleAddTask} className="flex flex-col lg:flex-row lg:items-center gap-2 pt-1">
             <input
               id="new-task-text-input"
               type="text"
               placeholder="新しいタスクを追加..."
               value={newTaskText}
               onChange={(e) => setNewTaskText(e.target.value)}
-              className="w-full sm:flex-1 min-h-11 text-base sm:text-xs px-3 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="w-full lg:flex-1 min-h-11 text-base lg:text-xs px-3 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-2 w-full lg:w-auto">
               <input
                 type="datetime-local"
                 value={newTaskDueDate}
                 onChange={(e) => setNewTaskDueDate(e.target.value)}
-                className="flex-1 sm:flex-none sm:w-44 min-h-11 text-base sm:text-xs px-2 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 focus:outline-none text-neutral-500"
+                className="flex-1 lg:flex-none lg:w-44 min-h-11 text-base lg:text-xs px-2 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 focus:outline-none text-neutral-500"
                 title="期限日時（任意）"
               />
               <button
                 id="add-task-btn"
                 type="submit"
                 disabled={!newTaskText.trim()}
-                className="min-w-20 min-h-11 px-4 py-2 bg-amber-500 hover:bg-amber-400 active:bg-amber-300 disabled:opacity-40 text-black text-sm sm:text-xs font-semibold rounded-xl transition-colors"
+                className="min-w-20 min-h-11 px-4 py-2 bg-amber-500 hover:bg-amber-400 active:bg-amber-300 disabled:opacity-40 text-black text-sm lg:text-xs font-semibold rounded-xl transition-colors"
               >
                 追加
               </button>
@@ -943,7 +947,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                     <button
                       type="button"
                       onClick={() => onOpenAttachment(att)}
-                      className="p-1.5 text-neutral-400 hover:text-amber-500 rounded-lg transition-colors"
+                      className="min-w-11 min-h-11 inline-flex items-center justify-center text-neutral-400 hover:text-amber-500 rounded-lg transition-colors"
                       title="拡大表示 / 開く"
                     >
                       <Maximize2 className="w-3.5 h-3.5" />
@@ -951,7 +955,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                     <button
                       type="button"
                       onClick={() => handleDeleteAttachment(att.id)}
-                      className="p-1.5 text-neutral-400 hover:text-rose-500 rounded-lg transition-colors"
+                      className="min-w-11 min-h-11 inline-flex items-center justify-center text-neutral-400 hover:text-rose-500 rounded-lg transition-colors"
                       title="削除"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
