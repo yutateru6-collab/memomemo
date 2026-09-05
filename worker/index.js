@@ -52,7 +52,9 @@ async function listAllEntries(kv, prefix) {
     const values = await Promise.all(
       page.keys.map(async ({ name }) => {
         try {
-          return await kv.get(name, { type: 'json', cacheTtl: 60 });
+          // Do not opt into edge caching here. A sync response should reflect a write
+          // from the same request as closely as KV's consistency model allows.
+          return await kv.get(name, { type: 'json' });
         } catch {
           return null;
         }
