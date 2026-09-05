@@ -1,8 +1,11 @@
 import { Note, CloudflareSyncConfig } from '../types';
+import { toDateTimeLocalValue } from './dateTime';
+import { parseNotesArray, salvageNotesArray, sortNotesForDisplay } from './noteValidation';
 
 const DB_NAME = 'ios_notes_db';
 const DB_VERSION = 1;
 const STORE_NAME = 'notes';
+const INITIALIZED_KEY = 'ios_notes_initialized_v1';
 
 // Open IndexedDB
 function openDB(): Promise<IDBDatabase> {
@@ -52,12 +55,12 @@ console.log("Hello, iPhone Notes!");
     tags: ['ガイド', 'アイデア'],
     tasks: [
       { id: 'task-1', text: '新しいメモを作成してみる', completed: true },
-      { id: 'task-2', text: 'チェックリストにタスクを追加する', completed: false, dueDate: new Date(Date.now() + 86400000).toISOString().slice(0, 16) },
+      { id: 'task-2', text: 'チェックリストにタスクを追加する', completed: false, dueDate: toDateTimeLocalValue(Date.now() + 86400000) },
       { id: 'task-3', text: '画像やPDFを添付してみる', completed: false },
       { id: 'task-4', text: 'Cloudflare同期を設定する', completed: false }
     ],
     attachments: [],
-    dueDate: new Date(Date.now() + 86400000).toISOString().slice(0, 16),
+    dueDate: toDateTimeLocalValue(Date.now() + 86400000),
     reminderActive: true,
     isPinned: true,
     createdAt: Date.now() - 3600000,
@@ -73,11 +76,11 @@ console.log("Hello, iPhone Notes!");
     tags: ['買い物', 'ToDo'],
     tasks: [
       { id: 'shop-1', text: '牛乳と低脂肪ヨーグルト', completed: true },
-      { id: 'shop-2', text: 'ドリップコーヒーの豆（深煎り）', completed: false, dueDate: new Date(Date.now() + 3600000 * 4).toISOString().slice(0, 16) },
+      { id: 'shop-2', text: 'ドリップコーヒーの豆（深煎り）', completed: false, dueDate: toDateTimeLocalValue(Date.now() + 3600000 * 4) },
       { id: 'shop-3', text: 'キッチンペーパーと洗剤', completed: false }
     ],
     attachments: [],
-    dueDate: new Date(Date.now() + 3600000 * 5).toISOString().slice(0, 16),
+    dueDate: toDateTimeLocalValue(Date.now() + 3600000 * 5),
     reminderActive: true,
     isPinned: false,
     createdAt: Date.now() - 7200000,
@@ -95,19 +98,27 @@ export async function getAllNotes(): Promise<Note[]> {
       const request = store.getAll();
 
       request.onsuccess = () => {
-        const result = request.result as Note[];
-        if (!result || result.length === 0) {
-          // Initialize with sample notes
-          saveAllNotes(INITIAL_NOTES).then(() => resolve(INITIAL_NOTES));
-        } else {
-          // Sort by pinned then updatedAt desc
-          result.sort((a, b) => {
-            if (a.isPinned && !b.isPinned) return -1;
-            if (!a.isPinned && b.isPinned) return 1;
-            return b.updatedAt - a.updatedAt;
-          });
-          resolve(result);
+        const rawResult: unknown = request.result;
+        const strictResult = parseNotesArray(rawResult);
+        const result = strictResult ?? salvageNotesArray(rawResult);
+
+        if (strictResult === null && Array.isArray(rawResult) && rawResult.length > result.length) {
+          console.warn('Corrupted local note entries were ignored during recovery.');
+          if (result.length > 0) {
+            void saveAllNotes(result).catch((err) => console.warn('Failed to persist recovered notes', err));
+          }
         }
+
+        if (result.length === 0 && !wasInitialized()) {
+          // Seed sample notes only on the real first launch. If the user intentionally
+          // deletes/imports everything, an empty notebook must stay empty after reload.
+          void saveAllNotes(INITIAL_NOTES)
+            .catch((err) => console.warn('Failed to persist initial notes', err))
+            .finally(() => resolve(sortNotesForDisplay(INITIAL_NOTES)));
+          return;
+        }
+
+        resolve(sortNotesForDisplay(result));
       };
 
       request.onerror = () => {
@@ -122,7 +133,7 @@ export async function getAllNotes(): Promise<Note[]> {
 export async function saveNote(note: Note): Promise<void> {
   try {
     const db = await openDB();
-    return new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
       const request = store.put(note);
@@ -130,15 +141,24 @@ export async function saveNote(note: Note): Promise<void> {
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
-  } catch {
-    saveNoteToLocalStorage(note);
+    markInitialized();
+    return;
+  } catch (indexedDbError) {
+    try {
+      saveNoteToLocalStorage(note);
+      markInitialized();
+      return;
+    } catch (fallbackError) {
+      console.error('Both IndexedDB and localStorage save failed', indexedDbError, fallbackError);
+      throw new Error('メモを端末に保存できませんでした。空き容量やブラウザ設定を確認してください。');
+    }
   }
 }
 
 export async function deleteNote(id: string): Promise<void> {
   try {
     const db = await openDB();
-    return new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
       const request = store.delete(id);
@@ -146,15 +166,24 @@ export async function deleteNote(id: string): Promise<void> {
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
-  } catch {
-    deleteNoteFromLocalStorage(id);
+    markInitialized();
+    return;
+  } catch (indexedDbError) {
+    try {
+      deleteNoteFromLocalStorage(id);
+      markInitialized();
+      return;
+    } catch (fallbackError) {
+      console.error('Both IndexedDB and localStorage delete failed', indexedDbError, fallbackError);
+      throw new Error('メモを端末から削除できませんでした。');
+    }
   }
 }
 
 export async function saveAllNotes(notes: Note[]): Promise<void> {
   try {
     const db = await openDB();
-    return new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
       store.clear();
@@ -162,43 +191,74 @@ export async function saveAllNotes(notes: Note[]): Promise<void> {
 
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted'));
     });
-  } catch {
-    localStorage.setItem('ios_notes_data', JSON.stringify(notes));
+    markInitialized();
+    return;
+  } catch (indexedDbError) {
+    try {
+      localStorage.setItem('ios_notes_data', JSON.stringify(notes));
+      markInitialized();
+      return;
+    } catch (fallbackError) {
+      console.error('Both IndexedDB and localStorage bulk save failed', indexedDbError, fallbackError);
+      throw new Error('メモのバックアップを端末に保存できませんでした。');
+    }
   }
 }
 
 // LocalStorage Fallbacks
+function wasInitialized(): boolean {
+  try {
+    return localStorage.getItem(INITIALIZED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markInitialized(): void {
+  try {
+    localStorage.setItem(INITIALIZED_KEY, '1');
+  } catch {
+    // IndexedDB may still be available even when localStorage is blocked.
+  }
+}
+
 function getNotesFromLocalStorage(): Note[] {
   try {
     const data = localStorage.getItem('ios_notes_data');
     if (!data) {
+      if (wasInitialized()) return [];
       localStorage.setItem('ios_notes_data', JSON.stringify(INITIAL_NOTES));
-      return INITIAL_NOTES;
+      markInitialized();
+      return sortNotesForDisplay(INITIAL_NOTES);
     }
-    return JSON.parse(data);
+
+    const parsed: unknown = JSON.parse(data);
+    const strict = parseNotesArray(parsed);
+    if (strict) return strict;
+
+    const salvaged = salvageNotesArray(parsed);
+    if (salvaged.length > 0) {
+      localStorage.setItem('ios_notes_data', JSON.stringify(salvaged));
+      return salvaged;
+    }
+
+    return [];
   } catch {
-    return INITIAL_NOTES;
+    return wasInitialized() ? [] : sortNotesForDisplay(INITIAL_NOTES);
   }
 }
 
 function saveNoteToLocalStorage(note: Note) {
-  try {
-    const notes = getNotesFromLocalStorage().filter((n) => n.id !== note.id);
-    notes.unshift(note);
-    localStorage.setItem('ios_notes_data', JSON.stringify(notes));
-  } catch (err) {
-    console.warn('LocalStorage save failed', err);
-  }
+  const notes = getNotesFromLocalStorage().filter((n) => n.id !== note.id);
+  notes.unshift(note);
+  localStorage.setItem('ios_notes_data', JSON.stringify(notes));
 }
 
 function deleteNoteFromLocalStorage(id: string) {
-  try {
-    const notes = getNotesFromLocalStorage().filter((n) => n.id !== id);
-    localStorage.setItem('ios_notes_data', JSON.stringify(notes));
-  } catch (err) {
-    console.warn('LocalStorage delete failed', err);
-  }
+  const notes = getNotesFromLocalStorage().filter((n) => n.id !== id);
+  localStorage.setItem('ios_notes_data', JSON.stringify(notes));
 }
 
 // Cloudflare Configuration Storage

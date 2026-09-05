@@ -54,6 +54,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const latestNoteRef = useRef<Note>(note);
+  latestNoteRef.current = note;
 
   // Update title
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -157,42 +159,75 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     });
   };
 
-  // Handle File Upload (Image or PDF)
-  const processFiles = (files: FileList | null) => {
+  // Handle File Upload (Image or PDF). Read the whole selection first and then
+  // update once, otherwise simultaneous FileReader callbacks overwrite each other.
+  const processFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
-    Array.from(files).forEach((file) => {
-      // Allow images and PDFs
+    const MAX_ATTACHMENT_SIZE = 15 * 1024 * 1024;
+    const selectedFiles = Array.from(files);
+    const validFiles = selectedFiles.filter((file) => {
       const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
       const isImg = file.type.startsWith('image/');
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        if (!dataUrl) return;
-
-        const newAttachment: AttachmentItem = {
-          id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-          name: file.name,
-          type: isPdf ? 'pdf' : isImg ? 'image' : 'other',
-          mimeType: file.type || (isPdf ? 'application/pdf' : 'application/octet-stream'),
-          size: file.size,
-          dataUrl,
-          createdAt: Date.now(),
-        };
-
-        onUpdateNote({
-          ...note,
-          attachments: [...note.attachments, newAttachment],
-          updatedAt: Date.now(),
-        });
-      };
-      reader.readAsDataURL(file);
+      return (isPdf || isImg) && file.size <= MAX_ATTACHMENT_SIZE;
     });
+
+    const rejectedFiles = selectedFiles.filter((file) => !validFiles.includes(file));
+    if (rejectedFiles.length > 0) {
+      alert(
+        `画像またはPDF（1ファイル15MB以下）のみ添付できます。
+対象外: ${rejectedFiles
+          .map((file) => file.name)
+          .join(', ')}`
+      );
+    }
+    if (validFiles.length === 0) return;
+
+    try {
+      const newAttachments = await Promise.all(
+        validFiles.map(
+          (file, index) =>
+            new Promise<AttachmentItem>((resolve, reject) => {
+              const isPdf =
+                file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+              const reader = new FileReader();
+              reader.onerror = () => reject(reader.error ?? new Error(`Failed to read ${file.name}`));
+              reader.onload = (event) => {
+                const dataUrl = event.target?.result;
+                if (typeof dataUrl !== 'string' || !dataUrl) {
+                  reject(new Error(`Failed to read ${file.name}`));
+                  return;
+                }
+
+                resolve({
+                  id: `att-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 7)}`,
+                  name: file.name,
+                  type: isPdf ? 'pdf' : 'image',
+                  mimeType: file.type || (isPdf ? 'application/pdf' : 'image/*'),
+                  size: file.size,
+                  dataUrl,
+                  createdAt: Date.now(),
+                });
+              };
+              reader.readAsDataURL(file);
+            })
+        )
+      );
+
+      const latestNote = latestNoteRef.current;
+      onUpdateNote({
+        ...latestNote,
+        attachments: [...latestNote.attachments, ...newAttachments],
+        updatedAt: Date.now(),
+      });
+    } catch (err) {
+      console.error('Attachment read failed', err);
+      alert('添付ファイルの読み込みに失敗しました。ファイルを確認してもう一度お試しください。');
+    }
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    processFiles(e.target.files);
+    void processFiles(e.target.files);
     e.target.value = '';
   };
 
@@ -245,7 +280,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDraggingOver(false);
-    processFiles(e.dataTransfer.files);
+    void processFiles(e.dataTransfer.files);
   };
 
   const completedTasksCount = note.tasks.filter((t) => t.completed).length;

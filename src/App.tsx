@@ -10,6 +10,7 @@ import {
   saveAllNotes
 } from './services/storage';
 import { syncWithCloudflare } from './services/cloudflareSync';
+import { mergeNotesByFreshness } from './services/noteValidation';
 import { checkReminders } from './services/notifications';
 import { NoteList } from './components/NoteList';
 import { NoteEditor } from './components/NoteEditor';
@@ -41,6 +42,8 @@ export default function App() {
 
   // Cloudflare & Modals
   const [cfConfig, setCfConfig] = useState<CloudflareSyncConfig>(DEFAULT_CF_CONFIG);
+  const notesRef = useRef<Note[]>([]);
+  const cfConfigRef = useRef<CloudflareSyncConfig>(DEFAULT_CF_CONFIG);
   const [isCloudflareModalOpen, setIsCloudflareModalOpen] = useState<boolean>(false);
   const [isRemindersModalOpen, setIsRemindersModalOpen] = useState<boolean>(false);
   const [activeAttachment, setActiveAttachment] = useState<AttachmentItem | null>(null);
@@ -74,8 +77,10 @@ export default function App() {
     async function loadData() {
       try {
         const loadedNotes = await getAllNotes();
+        notesRef.current = loadedNotes;
         setNotes(loadedNotes);
         const config = getCloudflareConfig();
+        cfConfigRef.current = config;
         setCfConfig(config);
         setIsLoaded(true);
       } catch (err) {
@@ -101,72 +106,118 @@ export default function App() {
     return () => clearInterval(interval);
   }, [notes, isLoaded]);
 
-  // Debounced auto-sync to Cloudflare
+  // Debounced auto-sync to Cloudflare. Refs are updated synchronously so a delayed
+  // request always reads the latest notes/config instead of a stale render snapshot.
   const autoSyncTimer = useRef<number | null>(null);
-  const triggerCloudflareSync = useCallback(async () => {
-    if (!cfConfig.workerUrl) {
-      setCfConfig((prev) => ({
-        ...prev,
+
+  const applyCloudflareConfig = useCallback((updated: CloudflareSyncConfig) => {
+    cfConfigRef.current = updated;
+    setCfConfig(updated);
+    saveCloudflareConfig(updated);
+  }, []);
+
+  const reportStorageError = useCallback((action: string, err: unknown) => {
+    console.error(`${action} failed`, err);
+    setInAppAlert({
+      title: '⚠️ メモを保存できませんでした',
+      body: err instanceof Error ? err.message : '端末の空き容量やブラウザの保存設定を確認してください。',
+    });
+  }, []);
+
+  const triggerCloudflareSync = useCallback(async (configOverride?: CloudflareSyncConfig) => {
+    const configToUse = configOverride ?? cfConfigRef.current;
+    if (!configToUse.workerUrl.trim()) {
+      applyCloudflareConfig({
+        ...cfConfigRef.current,
+        ...configToUse,
         status: 'error',
         errorMessage: 'Cloudflare WorkerのURLを設定してください。',
-      }));
+      });
       return;
     }
 
-    setCfConfig((prev) => ({ ...prev, status: 'syncing', errorMessage: null }));
+    const syncingConfig: CloudflareSyncConfig = {
+      ...cfConfigRef.current,
+      ...configToUse,
+      status: 'syncing',
+      errorMessage: null,
+    };
+    cfConfigRef.current = syncingConfig;
+    setCfConfig(syncingConfig);
 
-    const result = await syncWithCloudflare(notes, cfConfig);
+    const notesToSync = notesRef.current;
+    const result = await syncWithCloudflare(notesToSync, configToUse);
 
     if (result.success) {
-      const now = Date.now();
-      const updatedConfig: CloudflareSyncConfig = {
-        ...cfConfig,
-        status: 'success',
-        lastSyncTime: now,
-        errorMessage: null,
-      };
-      setCfConfig(updatedConfig);
-      saveCloudflareConfig(updatedConfig);
-
-      if (result.remoteNotes && result.remoteNotes.length > 0) {
-        // Merge notes if remote has extra or newer items
-        setNotes(result.remoteNotes);
-        saveAllNotes(result.remoteNotes);
+      if (result.remoteNotes) {
+        // Never replace local state blindly. If the user edited while the request was
+        // in flight, the newest updatedAt/version wins.
+        const mergedNotes = mergeNotesByFreshness(notesRef.current, result.remoteNotes);
+        notesRef.current = mergedNotes;
+        setNotes(mergedNotes);
+        try {
+          await saveAllNotes(mergedNotes);
+        } catch (err) {
+          reportStorageError('同期後の保存', err);
+          applyCloudflareConfig({
+            ...cfConfigRef.current,
+            status: 'error',
+            errorMessage: '同期データを端末に保存できませんでした。',
+          });
+          return;
+        }
       }
+
+      applyCloudflareConfig({
+        ...cfConfigRef.current,
+        status: 'success',
+        lastSyncTime: Date.now(),
+        errorMessage: null,
+      });
     } else {
-      const updatedConfig: CloudflareSyncConfig = {
-        ...cfConfig,
+      applyCloudflareConfig({
+        ...cfConfigRef.current,
         status: 'error',
         errorMessage: result.error || '同期に失敗しました',
-      };
-      setCfConfig(updatedConfig);
-      saveCloudflareConfig(updatedConfig);
+      });
     }
-  }, [cfConfig, notes]);
+  }, [applyCloudflareConfig, reportStorageError]);
 
-  // Handle Note Save/Update
+  const scheduleAutoSync = useCallback(() => {
+    const currentConfig = cfConfigRef.current;
+    if (!currentConfig.autoSync || !currentConfig.workerUrl.trim()) return;
+    if (autoSyncTimer.current) window.clearTimeout(autoSyncTimer.current);
+    autoSyncTimer.current = window.setTimeout(() => {
+      void triggerCloudflareSync();
+    }, 3000);
+  }, [triggerCloudflareSync]);
+
+  useEffect(() => {
+    return () => {
+      if (autoSyncTimer.current) window.clearTimeout(autoSyncTimer.current);
+    };
+  }, []);
+
+  // Handle Note Save/Update. Keep this outside a React state-updater function so
+  // StrictMode cannot run storage/network side effects twice in development.
   const handleUpdateNote = (updatedNote: Note) => {
-    setNotes((prevNotes) => {
-      const exists = prevNotes.some((n) => n.id === updatedNote.id);
-      let nextNotes: Note[];
-      if (exists) {
-        nextNotes = prevNotes.map((n) => (n.id === updatedNote.id ? updatedNote : n));
-      } else {
-        nextNotes = [updatedNote, ...prevNotes];
-      }
+    const currentNotes = notesRef.current;
+    const existing = currentNotes.find((n) => n.id === updatedNote.id);
+    const noteToSave: Note = existing
+      ? {
+          ...updatedNote,
+          version: Math.max((existing.version || 1) + 1, updatedNote.version || 1),
+        }
+      : updatedNote;
 
-      saveNote(updatedNote);
+    const nextNotes = existing
+      ? currentNotes.map((n) => (n.id === noteToSave.id ? noteToSave : n))
+      : [noteToSave, ...currentNotes];
 
-      // Auto-sync if enabled
-      if (cfConfig.autoSync && cfConfig.workerUrl) {
-        if (autoSyncTimer.current) window.clearTimeout(autoSyncTimer.current);
-        autoSyncTimer.current = window.setTimeout(() => {
-          triggerCloudflareSync();
-        }, 3000);
-      }
-
-      return nextNotes;
-    });
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
+    void saveNote(noteToSave).catch((err) => reportStorageError('メモ保存', err));
+    scheduleAutoSync();
   };
 
   // Create New Note
@@ -183,23 +234,35 @@ export default function App() {
       version: 1,
     };
 
-    setNotes((prev) => [newNote, ...prev]);
+    const nextNotes = [newNote, ...notesRef.current];
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
     setSelectedNoteId(newNote.id);
-    saveNote(newNote);
+    void saveNote(newNote).catch((err) => reportStorageError('新規メモ保存', err));
+    scheduleAutoSync();
   };
 
   // Delete Note
   const handleDeleteNote = async (noteId: string) => {
-    await deleteNoteStorage(noteId);
-    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+    try {
+      await deleteNoteStorage(noteId);
+    } catch (err) {
+      reportStorageError('メモ削除', err);
+      return;
+    }
+
+    const nextNotes = notesRef.current.filter((n) => n.id !== noteId);
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
     if (selectedNoteId === noteId) {
       setSelectedNoteId(null);
     }
+    scheduleAutoSync();
   };
 
   // Quick Toggle task from Reminders Modal
   const handleToggleTask = (noteId: string, taskId: string) => {
-    const targetNote = notes.find((n) => n.id === noteId);
+    const targetNote = notesRef.current.find((n) => n.id === noteId);
     if (!targetNote) return;
 
     const updatedNote: Note = {
@@ -214,7 +277,7 @@ export default function App() {
 
   // Quick Update task due date from Reminders Modal
   const handleUpdateTaskDueDate = (noteId: string, taskId: string, dueDate: string) => {
-    const targetNote = notes.find((n) => n.id === noteId);
+    const targetNote = notesRef.current.find((n) => n.id === noteId);
     if (!targetNote) return;
 
     const updatedNote: Note = {
@@ -261,14 +324,14 @@ export default function App() {
   return (
     <div className="min-h-screen w-full bg-neutral-200 dark:bg-neutral-950 flex flex-col items-center justify-center relative font-sans transition-colors duration-200">
       {/* Top Floating Control Bar (Desktop Mode Switcher & Guide) */}
-      <div className="w-full max-w-5xl px-4 py-2 flex items-center justify-between text-xs text-neutral-600 dark:text-neutral-400">
+      <div className="hidden md:flex w-full max-w-5xl px-4 py-2 items-center justify-between text-xs text-neutral-600 dark:text-neutral-400">
         <div className="flex items-center gap-2">
           <span className="font-semibold text-neutral-800 dark:text-neutral-200">
             iOS Notes (日本語版)
           </span>
           <span className="hidden sm:inline text-neutral-400">•</span>
           <span className="hidden sm:inline text-[11px]">
-            {isOnline ? '🟢 オンライン (IndexedDB保存済み)' : '🔌 オフライン動作中'}
+            {isOnline ? '🟢 オンライン' : '🔌 オフライン動作中'}
           </span>
         </div>
 
@@ -327,7 +390,7 @@ export default function App() {
         className={`w-full transition-all duration-300 flex justify-center ${
           isIPhoneFrame
             ? 'max-w-[420px] h-[860px] max-h-[92vh] my-2'
-            : 'max-w-5xl h-[92vh] my-1 sm:my-2 px-0 sm:px-4'
+            : 'max-w-5xl h-[100dvh] md:h-[92vh] my-0 md:my-2 px-0 md:px-4'
         }`}
       >
         {/* The Frame / Chassis */}
@@ -335,7 +398,7 @@ export default function App() {
           className={`w-full h-full flex flex-col overflow-hidden bg-white dark:bg-[#000000] text-neutral-900 dark:text-neutral-100 ${
             isIPhoneFrame
               ? 'rounded-[48px] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] border-[10px] border-neutral-800 dark:border-neutral-800 ring-1 ring-neutral-700/50 relative'
-              : 'rounded-2xl sm:rounded-3xl shadow-xl border border-neutral-300 dark:border-neutral-800'
+              : 'rounded-none md:rounded-3xl shadow-none md:shadow-xl border-0 md:border border-neutral-300 dark:border-neutral-800'
           }`}
         >
           {/* iPhone Dynamic Island / Notch Mockup (Only visible in iPhone Frame mode) */}
@@ -467,15 +530,14 @@ export default function App() {
         isOpen={isCloudflareModalOpen}
         onClose={() => setIsCloudflareModalOpen(false)}
         config={cfConfig}
-        onSaveConfig={(updated) => {
-          setCfConfig(updated);
-          saveCloudflareConfig(updated);
-        }}
+        onSaveConfig={applyCloudflareConfig}
         onTriggerSync={triggerCloudflareSync}
         notes={notes}
         onImportNotes={(importedNotes) => {
+          notesRef.current = importedNotes;
           setNotes(importedNotes);
-          saveAllNotes(importedNotes);
+          setSelectedNoteId(null);
+          void saveAllNotes(importedNotes).catch((err) => reportStorageError('バックアップ復元', err));
         }}
       />
 

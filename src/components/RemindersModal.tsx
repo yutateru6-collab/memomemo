@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Note, TaskItem } from '../types';
 import { requestNotificationPermission } from '../services/notifications';
+import { toDateTimeLocalValue } from '../services/dateTime';
 import { X, Bell, Calendar, CheckCircle2, Circle, AlertCircle, ExternalLink, Clock } from 'lucide-react';
 
 interface RemindersModalProps {
@@ -76,7 +77,7 @@ export const RemindersModal: React.FC<RemindersModalProps> = ({
     setNotifPermission(perm);
     if (perm === 'granted') {
       new Notification('🔔 通知が有効になりました', {
-        body: '期日を迎えたメモやToDoタスクを自動でお知らせします。',
+        body: 'アプリを開いている間、期日が近いメモやToDoタスクをお知らせします。',
       });
     }
   };
@@ -229,7 +230,7 @@ export const RemindersModal: React.FC<RemindersModalProps> = ({
                           type="button"
                           onClick={() => {
                             setEditingDueDateTaskId(task.id);
-                            setTempDueDate(new Date(Date.now() + 86400000).toISOString().slice(0, 16));
+                            setTempDueDate(toDateTimeLocalValue(Date.now() + 86400000));
                           }}
                           className="text-neutral-400 hover:text-amber-500 underline decoration-dotted"
                         >
@@ -272,7 +273,7 @@ export const RemindersModal: React.FC<RemindersModalProps> = ({
 
         {/* Footer */}
         <div className="p-3 bg-neutral-50 dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800 text-center text-xs text-neutral-500">
-          未完了タスク {pendingTasks.length} 件 (定期的にバックグラウンドで期限を監視しています)
+          未完了タスク {pendingTasks.length} 件 (アプリを開いている間、30秒ごとに期限を確認します)
         </div>
       </div>
     </div>
