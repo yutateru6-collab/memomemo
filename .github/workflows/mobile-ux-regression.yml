@@ -23,21 +23,23 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('.github/workflows/fix-and-qa.yml')
           s = path.read_text()
-          old = """            await page.waitForSelector('#note-editor-container');
-            await page.click('#editor-reminder-btn');
-            const dueInput = page.locator('#note-editor-container input[type=\"datetime-local\"]').first();"""
-          new = """            await page.waitForSelector('#note-editor-container');
-            await page.click('#editor-more-btn');
-            await page.waitForSelector('#editor-more-menu');
-            await page.click('#editor-reminder-btn');
-            const dueInput = page.locator('#note-editor-container input[type=\"datetime-local\"]').first();"""
-          if old in s:
-              path.write_text(s.replace(old, new, 1))
-          elif new not in s:
-              raise SystemExit('Reminder QA layout was not recognized; refusing broad edit')
+          if "await page.click('#editor-more-btn');" not in s:
+              pattern = re.compile(r"(?m)^(\s*)await page\.click\('#editor-reminder-btn'\);\s*$")
+              match = pattern.search(s)
+              if not match:
+                  raise SystemExit('Legacy reminder QA click was not found; refusing broad edit')
+              indent = match.group(1)
+              replacement = (
+                  f"{indent}await page.click('#editor-more-btn');\n"
+                  f"{indent}await page.waitForSelector('#editor-more-menu');\n"
+                  f"{indent}await page.click('#editor-reminder-btn');"
+              )
+              s = pattern.sub(replacement, s, count=1)
+              path.write_text(s)
 
           temporary = Path('.github/workflows/update-mobile-ux-qa.yml')
           if temporary.exists():
