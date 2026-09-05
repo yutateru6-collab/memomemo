@@ -29,6 +29,14 @@
   }
 }
 
+/* Prevent iPhone Safari from auto-zooming when the memo body receives focus.
+   Keep the existing desktop typography unchanged. */
+@media (max-width: 639px) {
+  #note-content-textarea {
+    font-size: 16px;
+  }
+}
+
 /* iOS Safe Area Padding */
 .pt-safe {
   padding-top: max(env(safe-area-inset-top), 12px);
