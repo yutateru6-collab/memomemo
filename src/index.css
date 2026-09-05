@@ -60,3 +60,32 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(142, 142, 147, 0.5);
 }
+
+/* Mobile editor ergonomics: safe area + keyboard-friendly spacing.
+   Touch targets are verified separately by the mobile UX regression workflow. */
+.editor-mobile-header {
+  padding-top: max(env(safe-area-inset-top), 16px);
+}
+
+@media (min-width: 640px) {
+  .editor-mobile-header {
+    padding-top: 10px;
+  }
+}
+
+@media (max-width: 639px) {
+  /* iPhone Safari zooms focused form controls below 16px. */
+  input:not(#note-title-input),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  #note-content-textarea {
+    font-size: 16px !important;
+  }
+
+  .editor-scroll-content {
+    padding-bottom: max(112px, calc(env(safe-area-inset-bottom) + 88px));
+  }
+}

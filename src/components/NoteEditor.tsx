@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Note, TaskItem, AttachmentItem } from '../types';
+import { Note, TaskItem, AttachmentItem, CloudflareSyncConfig } from '../types';
 import {
   ChevronLeft,
   Pin,
@@ -24,6 +24,8 @@ import {
   CheckCircle2,
   Circle,
   Download,
+  Save,
+  MoreHorizontal,
   Maximize2
 } from 'lucide-react';
 
@@ -34,6 +36,9 @@ interface NoteEditorProps {
   onDeleteNote: (noteId: string) => void;
   onBack: () => void;
   onOpenAttachment: (attachment: AttachmentItem) => void;
+  onManualSave: () => Promise<boolean>;
+  syncStatus: CloudflareSyncConfig['status'];
+  isOnline: boolean;
 }
 
 export const NoteEditor: React.FC<NoteEditorProps> = ({
@@ -43,6 +48,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   onDeleteNote,
   onBack,
   onOpenAttachment,
+  onManualSave,
+  syncStatus,
+  isOnline,
 }) => {
   const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit');
   const [newTaskText, setNewTaskText] = useState('');
@@ -51,6 +59,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const [showTagInput, setShowTagInput] = useState(false);
   const [showReminderSetting, setShowReminderSetting] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -59,6 +69,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
   // Update title
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSaveState('idle');
     onUpdateNote({
       ...note,
       title: e.target.value,
@@ -68,6 +79,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
   // Update content
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setSaveState('idle');
     onUpdateNote({
       ...note,
       content: e.target.value,
@@ -283,6 +295,37 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     void processFiles(e.dataTransfer.files);
   };
 
+  const handleManualSaveClick = async () => {
+    setSaveState('saving');
+    const ok = await onManualSave();
+    setSaveState(ok ? 'saved' : 'error');
+    return ok;
+  };
+
+  const handleBackSafely = async () => {
+    const ok = await handleManualSaveClick();
+    if (ok) onBack();
+  };
+
+  const localSaveLabel =
+    saveState === 'saving'
+      ? '保存中…'
+      : saveState === 'saved'
+      ? '✓ 端末に保存済み'
+      : saveState === 'error'
+      ? '保存に失敗'
+      : '自動保存オン';
+
+  const cloudSyncLabel = !isOnline
+    ? '☁ オフライン・端末保存'
+    : syncStatus === 'syncing'
+    ? '☁ 同期中…'
+    : syncStatus === 'success'
+    ? '☁ 同期済み'
+    : syncStatus === 'error'
+    ? '☁ 同期エラー'
+    : '☁ 同期待ち';
+
   const completedTasksCount = note.tasks.filter((t) => t.completed).length;
 
   return (
@@ -293,116 +336,117 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* iOS Top Navigation Bar */}
-      <div className="flex items-center justify-between px-3 py-2.5 bg-neutral-50/90 dark:bg-[#1c1c1e]/90 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 z-10">
+      {/* Mobile-first top navigation: primary actions only */}
+      <div className="editor-mobile-header relative flex items-center justify-between px-3 pb-2 bg-neutral-50/95 dark:bg-[#1c1c1e]/95 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 z-30">
         <button
           id="editor-back-btn"
           type="button"
-          onClick={onBack}
-          className="flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-medium text-sm hover:opacity-80 transition-opacity"
+          onClick={() => void handleBackSafely()}
+          className="min-h-11 px-1.5 -ml-1 flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-semibold text-sm hover:opacity-80 active:opacity-60 transition-opacity"
         >
-          <ChevronLeft className="w-5 h-5 -ml-1" />
+          <ChevronLeft className="w-5 h-5" />
           <span>メモ一覧</span>
         </button>
 
-        {/* Action Toolbar */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Mode Switcher */}
-          <div className="flex items-center p-0.5 bg-neutral-200 dark:bg-neutral-800 rounded-lg">
+        <div className="flex items-center gap-1">
+          <button
+            id="editor-save-btn"
+            type="button"
+            onClick={() => void handleManualSaveClick()}
+            disabled={saveState === 'saving'}
+            className="min-h-11 px-3 inline-flex items-center gap-1.5 rounded-xl text-sm font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 active:bg-amber-500/20 disabled:opacity-60 transition-colors"
+          >
+            <Save className="w-4 h-4" />
+            <span>{saveState === 'saving' ? '保存中' : '保存'}</span>
+          </button>
+
+          <div className="relative">
             <button
-              id="mode-edit-btn"
+              id="editor-more-btn"
               type="button"
-              onClick={() => setViewMode('edit')}
-              className={`p-1.5 rounded-md text-xs font-medium flex items-center gap-1 transition-colors ${
-                viewMode === 'edit'
-                  ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-xs'
-                  : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
-              }`}
-              title="編集モード"
+              aria-label="その他の操作"
+              aria-expanded={showMoreMenu}
+              onClick={() => setShowMoreMenu((v) => !v)}
+              className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-xl text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 active:opacity-70 transition-colors"
             >
-              <Edit3 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">編集</span>
+              <MoreHorizontal className="w-5 h-5" />
             </button>
-            <button
-              id="mode-preview-btn"
-              type="button"
-              onClick={() => setViewMode('preview')}
-              className={`p-1.5 rounded-md text-xs font-medium flex items-center gap-1 transition-colors ${
-                viewMode === 'preview'
-                  ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-xs'
-                  : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
-              }`}
-              title="プレビューモード"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">閲覧</span>
-            </button>
+
+            {showMoreMenu && (
+              <div
+                id="editor-more-menu"
+                className="absolute right-0 top-full mt-1 w-52 overflow-hidden rounded-2xl border border-neutral-200 dark:border-neutral-700 bg-white/98 dark:bg-neutral-900/98 shadow-2xl backdrop-blur-xl z-50"
+              >
+                <button
+                  id="editor-attach-file-btn"
+                  type="button"
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    fileInputRef.current?.click();
+                  }}
+                  className="w-full min-h-11 px-4 flex items-center gap-3 text-sm text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                >
+                  <Paperclip className="w-4 h-4 text-amber-500" />
+                  画像・PDFを添付
+                </button>
+                <button
+                  id="editor-reminder-btn"
+                  type="button"
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    setShowReminderSetting(true);
+                  }}
+                  className="w-full min-h-11 px-4 flex items-center gap-3 text-sm text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                >
+                  <Clock className="w-4 h-4 text-amber-500" />
+                  リマインダー
+                </button>
+                <button
+                  id="editor-pin-btn"
+                  type="button"
+                  onClick={() => {
+                    handleTogglePin();
+                    setShowMoreMenu(false);
+                  }}
+                  className="w-full min-h-11 px-4 flex items-center gap-3 text-sm text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                >
+                  <Pin className={`w-4 h-4 ${note.isPinned ? 'fill-current text-amber-500' : 'text-neutral-500'}`} />
+                  {note.isPinned ? 'ピン留めを解除' : 'ピン留め'}
+                </button>
+                <button
+                  id="editor-delete-btn"
+                  type="button"
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    if (confirm('このメモを削除しますか？')) onDeleteNote(note.id);
+                  }}
+                  className="w-full min-h-11 px-4 flex items-center gap-3 text-sm text-left text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  メモを削除
+                </button>
+              </div>
+            )}
           </div>
-
-          {/* Attach File Button */}
-          <button
-            id="editor-attach-file-btn"
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="p-1.5 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors"
-            title="画像やPDFを添付"
-          >
-            <Paperclip className="w-4 h-4" />
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept="image/*,application/pdf"
-            onChange={handleFileInputChange}
-            className="hidden"
-          />
-
-          {/* Reminder / Due Date Button */}
-          <button
-            id="editor-reminder-btn"
-            type="button"
-            onClick={() => setShowReminderSetting(!showReminderSetting)}
-            className={`p-1.5 rounded-lg transition-colors ${
-              note.reminderActive || note.dueDate
-                ? 'text-amber-500 bg-amber-500/10'
-                : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-            }`}
-            title="リマインダー設定"
-          >
-            <Clock className="w-4 h-4" />
-          </button>
-
-          {/* Pin Button */}
-          <button
-            id="editor-pin-btn"
-            type="button"
-            onClick={handleTogglePin}
-            className={`p-1.5 rounded-lg transition-colors ${
-              note.isPinned
-                ? 'text-amber-500 bg-amber-500/10'
-                : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800'
-            }`}
-            title="ピン留め"
-          >
-            <Pin className={`w-4 h-4 ${note.isPinned ? 'fill-current' : ''}`} />
-          </button>
-
-          {/* Delete Button */}
-          <button
-            id="editor-delete-btn"
-            type="button"
-            onClick={() => {
-              if (confirm('このメモを削除しますか？')) {
-                onDeleteNote(note.id);
-              }
-            }}
-            className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
-            title="メモを削除"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
         </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,application/pdf"
+          onChange={handleFileInputChange}
+          className="hidden"
+        />
+      </div>
+
+      <div
+        id="editor-save-status"
+        className="px-4 sm:px-6 py-1.5 flex items-center gap-2 border-b border-neutral-100 dark:border-neutral-800 bg-white/90 dark:bg-[#1c1c1e]/90 text-[11px] text-neutral-500 dark:text-neutral-400"
+      >
+        <span className={saveState === 'error' ? 'text-rose-500' : ''}>{localSaveLabel}</span>
+        <span>•</span>
+        <span className={syncStatus === 'error' ? 'text-rose-500' : ''}>{cloudSyncLabel}</span>
       </div>
 
       {/* Reminder Setting Drawer / Banner */}
@@ -456,7 +500,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       )}
 
       {/* Main Scrollable Content */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
+      <div className="editor-scroll-content flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
         {/* Title Input */}
         <div>
           <input
@@ -529,7 +573,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               id="add-tag-chip-btn"
               type="button"
               onClick={() => setShowTagInput(true)}
-              className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800/60 hover:bg-neutral-200 text-neutral-500 transition-colors"
+              className="inline-flex min-h-11 items-center gap-1 text-sm sm:text-xs px-3 py-1 rounded-xl bg-neutral-100 dark:bg-neutral-800/60 hover:bg-neutral-200 text-neutral-500 transition-colors"
             >
               <Plus className="w-3 h-3" />
               <span>タグを追加</span>
@@ -634,7 +678,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                     <button
                       type="button"
                       onClick={() => handleDeleteTask(task.id)}
-                      className="opacity-0 group-hover:opacity-100 p-1 text-neutral-400 hover:text-rose-500 transition-opacity"
+                      className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 min-w-11 min-h-11 inline-flex items-center justify-center text-neutral-400 hover:text-rose-500 transition-opacity"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -644,31 +688,33 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             })}
           </div>
 
-          {/* Add New Task Form */}
-          <form onSubmit={handleAddTask} className="flex items-center gap-2 pt-1">
+          {/* Add New Task Form: stacked on phones so controls never get squeezed off-screen */}
+          <form onSubmit={handleAddTask} className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1">
             <input
               id="new-task-text-input"
               type="text"
-              placeholder="新しいタスクを箇条書きで追加..."
+              placeholder="新しいタスクを追加..."
               value={newTaskText}
               onChange={(e) => setNewTaskText(e.target.value)}
-              className="flex-1 text-xs px-3 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="w-full sm:flex-1 min-h-11 text-base sm:text-xs px-3 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
-            <input
-              type="datetime-local"
-              value={newTaskDueDate}
-              onChange={(e) => setNewTaskDueDate(e.target.value)}
-              className="text-xs px-2 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 focus:outline-none text-neutral-500"
-              title="期限日時（任意）"
-            />
-            <button
-              id="add-task-btn"
-              type="submit"
-              disabled={!newTaskText.trim()}
-              className="px-3 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black text-xs font-semibold rounded-xl transition-colors"
-            >
-              追加
-            </button>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <input
+                type="datetime-local"
+                value={newTaskDueDate}
+                onChange={(e) => setNewTaskDueDate(e.target.value)}
+                className="flex-1 sm:flex-none sm:w-44 min-h-11 text-base sm:text-xs px-2 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 focus:outline-none text-neutral-500"
+                title="期限日時（任意）"
+              />
+              <button
+                id="add-task-btn"
+                type="submit"
+                disabled={!newTaskText.trim()}
+                className="min-w-20 min-h-11 px-4 py-2 bg-amber-500 hover:bg-amber-400 active:bg-amber-300 disabled:opacity-40 text-black text-sm sm:text-xs font-semibold rounded-xl transition-colors"
+              >
+                追加
+              </button>
+            </div>
           </form>
         </div>
 
@@ -677,13 +723,44 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
         {/* Markdown Content Section */}
         <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center p-1 bg-neutral-100 dark:bg-neutral-800/60 rounded-xl border border-neutral-200 dark:border-neutral-700/60">
+              <button
+                id="mode-edit-btn"
+                type="button"
+                onClick={() => setViewMode('edit')}
+                className={`min-h-11 px-3 rounded-lg text-sm sm:text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                  viewMode === 'edit'
+                    ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
+                    : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
+                }`}
+              >
+                <Edit3 className="w-4 h-4" />
+                編集
+              </button>
+              <button
+                id="mode-preview-btn"
+                type="button"
+                onClick={() => setViewMode('preview')}
+                className={`min-h-11 px-3 rounded-lg text-sm sm:text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                  viewMode === 'preview'
+                    ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
+                    : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
+                }`}
+              >
+                <Eye className="w-4 h-4" />
+                閲覧
+              </button>
+            </div>
+          </div>
+
           {/* Formatting Toolbar (Only in edit mode) */}
           {viewMode === 'edit' && (
-            <div className="flex flex-wrap items-center gap-1 p-1 bg-neutral-100 dark:bg-neutral-800/60 rounded-xl border border-neutral-200 dark:border-neutral-700/60">
+            <div className="markdown-toolbar flex flex-wrap items-center gap-1 p-1 bg-neutral-100 dark:bg-neutral-800/60 rounded-xl border border-neutral-200 dark:border-neutral-700/60">
               <button
                 type="button"
                 onClick={() => insertMarkdown('**', '**')}
-                className="p-1.5 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
+                className="min-w-11 min-h-11 sm:min-w-0 sm:min-h-0 p-2 sm:p-1.5 inline-flex items-center justify-center rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
                 title="太字 (**テキスト**)"
               >
                 <Bold className="w-3.5 h-3.5" />
@@ -691,7 +768,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               <button
                 type="button"
                 onClick={() => insertMarkdown('*', '*')}
-                className="p-1.5 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
+                className="min-w-11 min-h-11 sm:min-w-0 sm:min-h-0 p-2 sm:p-1.5 inline-flex items-center justify-center rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
                 title="斜体 (*テキスト*)"
               >
                 <Italic className="w-3.5 h-3.5" />
@@ -699,7 +776,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               <button
                 type="button"
                 onClick={() => insertMarkdown('### ')}
-                className="p-1.5 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
+                className="min-w-11 min-h-11 sm:min-w-0 sm:min-h-0 p-2 sm:p-1.5 inline-flex items-center justify-center rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
                 title="見出し (### 見出し)"
               >
                 <Heading className="w-3.5 h-3.5" />
@@ -707,7 +784,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               <button
                 type="button"
                 onClick={() => insertMarkdown('- ')}
-                className="p-1.5 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
+                className="min-w-11 min-h-11 sm:min-w-0 sm:min-h-0 p-2 sm:p-1.5 inline-flex items-center justify-center rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
                 title="リスト項目 (- 項目)"
               >
                 <List className="w-3.5 h-3.5" />
@@ -715,7 +792,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               <button
                 type="button"
                 onClick={() => insertMarkdown('> ')}
-                className="p-1.5 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
+                className="min-w-11 min-h-11 sm:min-w-0 sm:min-h-0 p-2 sm:p-1.5 inline-flex items-center justify-center rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
                 title="引用 (> 引用)"
               >
                 <Quote className="w-3.5 h-3.5" />
@@ -723,7 +800,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               <button
                 type="button"
                 onClick={() => insertMarkdown('`', '`')}
-                className="p-1.5 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
+                className="min-w-11 min-h-11 sm:min-w-0 sm:min-h-0 p-2 sm:p-1.5 inline-flex items-center justify-center rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
                 title="インラインコード (`code`)"
               >
                 <Code className="w-3.5 h-3.5" />
@@ -740,12 +817,12 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               placeholder="メモの内容をマークダウンで自由に入力... (画像やPDFのドラッグ＆ドロップも可能)"
               value={note.content}
               onChange={handleContentChange}
-              className="w-full text-sm leading-relaxed bg-transparent border-none outline-hidden resize-y text-neutral-800 dark:text-neutral-200 placeholder:text-neutral-400 font-sans min-h-[220px]"
+              className="w-full text-sm leading-relaxed bg-transparent border-none outline-hidden resize-y text-neutral-800 dark:text-neutral-200 placeholder:text-neutral-400 font-sans min-h-[220px] select-text"
             />
           ) : (
             <div
               id="note-markdown-rendered-view"
-              className="prose prose-sm dark:prose-invert max-w-none py-2 min-h-[200px] text-neutral-800 dark:text-neutral-200"
+              className="prose prose-sm dark:prose-invert max-w-none py-2 min-h-[200px] text-neutral-800 dark:text-neutral-200 select-text"
             >
               {note.content ? (
                 <ReactMarkdown>{note.content}</ReactMarkdown>
@@ -775,7 +852,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline font-medium"
+              className="inline-flex min-h-11 items-center gap-1 px-2 -my-2 text-sm sm:text-xs text-amber-600 dark:text-amber-400 hover:underline font-medium"
             >
               <Plus className="w-3.5 h-3.5" />
               ファイルを追加
