@@ -1,0 +1,164 @@
+name: Mobile Human UX Regression
+
+on:
+  push:
+    branches:
+      - fix/mobile-human-ux-20260905
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  mobile-ux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run build
+
+      - name: Install browser QA
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Start app
+        run: |
+          bun run dev > /tmp/memomemo-mobile-ux.log 2>&1 &
+          for i in {1..40}; do
+            curl -fsS http://127.0.0.1:3000 >/dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/memomemo-mobile-ux.log
+          exit 1
+
+      - name: Run phone UX and save-flow checks
+        run: |
+          mkdir -p mobile-ux-artifacts
+          cat > /tmp/mobile-ux-regression.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+
+          const browser = await chromium.launch({ headless: true });
+          const context = await browser.newContext({
+            viewport: { width: 390, height: 844 },
+            deviceScaleFactor: 3,
+            isMobile: true,
+            hasTouch: true,
+            userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+          });
+          const page = await context.newPage();
+          const failures = [];
+
+          const box = async (selector) => await page.locator(selector).boundingBox();
+          const fail = (condition, message) => { if (condition) failures.push(message); };
+
+          await page.goto('http://127.0.0.1:3000', { waitUntil: 'networkidle' });
+          await page.waitForSelector('#note-list-container');
+          await page.click('#create-new-note-bottom-btn');
+          await page.waitForSelector('#note-editor-container');
+
+          const metrics = await page.evaluate(() => {
+            const rect = (selector) => {
+              const el = document.querySelector(selector);
+              if (!el) return null;
+              const r = el.getBoundingClientRect();
+              return { x:r.x, y:r.y, width:r.width, height:r.height, right:r.right, bottom:r.bottom };
+            };
+            const inputFonts = Array.from(document.querySelectorAll('input, textarea, select'))
+              .filter((el) => {
+                const r = el.getBoundingClientRect();
+                const s = getComputedStyle(el);
+                return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+              })
+              .map((el) => ({ id: el.id || null, type: el.getAttribute('type'), fontSize: parseFloat(getComputedStyle(el).fontSize) }));
+            const formattingHeights = Array.from(document.querySelectorAll('.markdown-toolbar button'))
+              .map((el) => el.getBoundingClientRect().height);
+            return {
+              viewportWidth: innerWidth,
+              scrollWidth: document.documentElement.scrollWidth,
+              back: rect('#editor-back-btn'),
+              save: rect('#editor-save-btn'),
+              more: rect('#editor-more-btn'),
+              edit: rect('#mode-edit-btn'),
+              preview: rect('#mode-preview-btn'),
+              status: rect('#editor-save-status'),
+              taskText: rect('#new-task-text-input'),
+              taskAdd: rect('#add-task-btn'),
+              textareaFont: parseFloat(getComputedStyle(document.querySelector('#note-content-textarea')).fontSize),
+              bodyUserSelect: getComputedStyle(document.body).userSelect,
+              inputFonts,
+              formattingHeights,
+            };
+          });
+
+          fail(metrics.scrollWidth > metrics.viewportWidth + 1, `horizontal overflow: ${metrics.scrollWidth}px > ${metrics.viewportWidth}px`);
+          for (const [name, target] of [['back', metrics.back], ['save', metrics.save], ['more', metrics.more], ['edit', metrics.edit], ['preview', metrics.preview]]) {
+            fail(!target, `${name} control is missing`);
+            if (target) fail(target.height < 44, `${name} touch target is only ${target.height}px high`);
+          }
+          fail(!metrics.status, 'save/sync status line is missing');
+          fail(metrics.back && metrics.back.y < 16, `back control starts too high at y=${metrics.back?.y}`);
+          fail(metrics.textareaFont < 16, `memo textarea font is ${metrics.textareaFont}px`);
+          fail(metrics.bodyUserSelect === 'none', 'memo text selection is globally disabled');
+          for (const field of metrics.inputFonts) {
+            fail(field.fontSize < 16, `visible form control ${field.id || field.type || 'unknown'} is ${field.fontSize}px`);
+          }
+          for (const height of metrics.formattingHeights) {
+            fail(height < 44, `formatting touch target is ${height}px high`);
+          }
+          fail(metrics.taskText && metrics.taskText.right > metrics.viewportWidth + 1, 'task text input is clipped off-screen');
+          fail(metrics.taskAdd && metrics.taskAdd.right > metrics.viewportWidth + 1, 'task Add button is clipped off-screen');
+
+          await page.fill('#note-title-input', 'MOBILE SAVE QA');
+          await page.fill('#note-content-textarea', 'save button persistence check');
+          await page.click('#editor-save-btn');
+          await page.waitForTimeout(250);
+          fail(!(await page.getByText('端末に保存済み', { exact: false }).count()), 'Save button gives no saved confirmation');
+          await page.screenshot({ path: 'mobile-ux-artifacts/editor-after-save.png', fullPage: true });
+
+          await page.reload({ waitUntil: 'networkidle' });
+          await page.waitForSelector('#note-list-container');
+          fail(!(await page.getByText('MOBILE SAVE QA', { exact: true }).count()), 'Save button did not persist note across reload');
+
+          await page.getByText('MOBILE SAVE QA', { exact: true }).click();
+          await page.fill('#note-title-input', 'BACK SAVE QA');
+          await page.click('#editor-back-btn');
+          await page.waitForSelector('#note-list-container');
+          fail(!(await page.getByText('BACK SAVE QA', { exact: true }).count()), 'Back did not return to list with the latest title');
+          await page.reload({ waitUntil: 'networkidle' });
+          await page.waitForSelector('#note-list-container');
+          fail(!(await page.getByText('BACK SAVE QA', { exact: true }).count()), 'Back/save flow did not persist across reload');
+
+          await page.getByText('BACK SAVE QA', { exact: true }).click();
+          await page.click('#editor-more-btn');
+          await page.waitForSelector('#editor-more-menu');
+          const menuButtons = await page.locator('#editor-more-menu button').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+          for (const h of menuButtons) fail(h < 44, `More-menu touch target is ${h}px high`);
+          await page.screenshot({ path: 'mobile-ux-artifacts/editor-more-menu.png', fullPage: true });
+
+          const source = fs.readFileSync('src/components/NoteEditor.tsx', 'utf8');
+          fail(source.includes('opacity-0 group-hover:opacity-100'), 'touch action remains hover-only');
+
+          fs.writeFileSync('mobile-ux-artifacts/metrics.json', JSON.stringify({ metrics, failures }, null, 2));
+          console.log(JSON.stringify({ metrics, failures }, null, 2));
+          await browser.close();
+          if (failures.length) process.exit(1);
+          EOF
+          node /tmp/mobile-ux-regression.mjs
+
+      - name: Upload phone UX evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-human-ux-regression
+          path: mobile-ux-artifacts/
