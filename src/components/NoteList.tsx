@@ -189,7 +189,7 @@ export const NoteList: React.FC<NoteListProps> = ({
         {/* Primary create action stays at the top so it is always easy to reach. */}
         <div className="mb-2">
           <button
-            id="create-new-note-top-btn"
+            id="create-new-note-bottom-btn" data-testid="create-new-note-top-btn"
             type="button"
             onClick={onCreateNewNote}
             className="w-full min-h-11 flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 active:bg-amber-300 text-black text-sm font-bold rounded-xl shadow-sm transition-all active:scale-[0.99]"
