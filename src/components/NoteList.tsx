@@ -186,6 +186,19 @@ export const NoteList: React.FC<NoteListProps> = ({
           </div>
         </div>
 
+        {/* Primary create action stays at the top so it is always easy to reach. */}
+        <div className="mb-2">
+          <button
+            id="create-new-note-bottom-btn" data-testid="create-new-note-top-btn"
+            type="button"
+            onClick={onCreateNewNote}
+            className="w-full min-h-11 flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 active:bg-amber-300 text-black text-sm font-bold rounded-xl shadow-sm transition-all active:scale-[0.99]"
+          >
+            <SquarePen className="w-4 h-4" />
+            <span>新規メモ</span>
+          </button>
+        </div>
+
         {/* iOS Style Search Bar */}
         <div className="relative flex items-center">
           <Search className="w-4 h-4 text-neutral-400 absolute left-3 pointer-events-none" />
@@ -285,10 +298,13 @@ export const NoteList: React.FC<NoteListProps> = ({
             </button>
           ))}
         </div>
+        <div className="pb-1 text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+          {notes.length} 件のメモ
+        </div>
       </div>
 
       {/* Grouped Note List Content */}
-      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4">
+      <div className="flex-1 overflow-y-auto px-4 py-2 pb-safe space-y-4">
         {filteredNotes.length === 0 ? (
           <div className="text-center py-16 text-neutral-400">
             <p className="text-sm font-medium">一致するメモがありません</p>
@@ -333,22 +349,6 @@ export const NoteList: React.FC<NoteListProps> = ({
         )}
       </div>
 
-      {/* Bottom iOS Toolbar */}
-      <div className="py-2.5 px-4 bg-[#f2f2f7]/90 dark:bg-[#1c1c1e]/90 backdrop-blur-md border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between z-20 pb-safe">
-        <div className="text-[11px] text-neutral-500 dark:text-neutral-400 font-medium">
-          {notes.length} 件のメモ
-        </div>
-
-        <button
-          id="create-new-note-bottom-btn"
-          type="button"
-          onClick={onCreateNewNote}
-          className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold rounded-full shadow-sm transition-all transform active:scale-95"
-        >
-          <SquarePen className="w-4 h-4" />
-          <span>新規メモ</span>
-        </button>
-      </div>
     </div>
   );
 
@@ -367,6 +367,8 @@ export const NoteList: React.FC<NoteListProps> = ({
     return (
       <div
         key={note.id}
+        data-note-card="true"
+        data-note-id={note.id}
         onClick={() => onSelectNote(note)}
         className={`p-3.5 cursor-pointer transition-colors active:bg-neutral-100 dark:active:bg-neutral-800 ${
           isSelected

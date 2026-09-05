@@ -60,6 +60,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const [showReminderSetting, setShowReminderSetting] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [openTaskMenuId, setOpenTaskMenuId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -675,13 +676,37 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                       />
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteTask(task.id)}
-                      className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 min-w-11 min-h-11 inline-flex items-center justify-center text-neutral-400 hover:text-rose-500 transition-opacity"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="relative">
+                      <button
+                        id={`task-more-btn-${task.id}`}
+                        type="button"
+                        aria-label={`${task.text} のその他の操作`}
+                        aria-expanded={openTaskMenuId === task.id}
+                        onClick={() => setOpenTaskMenuId((current) => current === task.id ? null : task.id)}
+                        className="min-w-11 min-h-11 inline-flex items-center justify-center rounded-xl text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-200/70 dark:hover:bg-neutral-700/70 transition-colors"
+                      >
+                        <MoreHorizontal className="w-4 h-4" />
+                      </button>
+
+                      {openTaskMenuId === task.id && (
+                        <div className="absolute right-0 top-full mt-1 z-30 w-44 overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 shadow-xl">
+                          <button
+                            id={`task-delete-btn-${task.id}`}
+                            type="button"
+                            onClick={() => {
+                              if (confirm(`「${task.text}」を削除しますか？`)) {
+                                handleDeleteTask(task.id);
+                              }
+                              setOpenTaskMenuId(null);
+                            }}
+                            className="w-full min-h-11 px-4 flex items-center gap-2 text-left text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            タスクを削除
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               );

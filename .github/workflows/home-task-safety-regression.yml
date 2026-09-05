@@ -1,0 +1,138 @@
+name: Home and Task Safety Regression
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  home-task-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run build
+
+      - name: Install browser QA
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Start app
+        run: |
+          bun run dev > /tmp/memomemo-home-task.log 2>&1 &
+          for i in {1..40}; do
+            curl -fsS http://127.0.0.1:3000 >/dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/memomemo-home-task.log
+          exit 1
+
+      - name: Verify top create action, full note list, and safe task deletion
+        run: |
+          mkdir -p home-task-artifacts
+          cat > home-task-regression.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+
+          const browser = await chromium.launch({ headless: true });
+          const context = await browser.newContext({
+            viewport: { width: 390, height: 844 },
+            deviceScaleFactor: 3,
+            isMobile: true,
+            hasTouch: true,
+            userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+          });
+          const page = await context.newPage();
+          const failures = [];
+          const fail = (condition, message) => { if (condition) failures.push(message); };
+
+          await page.goto('http://127.0.0.1:3000', { waitUntil: 'networkidle' });
+          await page.waitForSelector('#note-list-container');
+
+          const topButton = page.locator('[data-testid="create-new-note-top-btn"]');
+          const search = page.locator('#notes-search-input');
+          fail(await topButton.count() !== 1, 'Top new-memo button is missing or duplicated');
+          const topBox = await topButton.boundingBox();
+          const searchBox = await search.boundingBox();
+          fail(!topBox || !searchBox || topBox.y >= searchBox.y, 'New-memo button is not above the search/list controls');
+          fail(topBox && topBox.height < 44, `Top new-memo touch target is only ${topBox?.height}px high`);
+
+          const initialCardCount = await page.locator('[data-note-card="true"]').count();
+          for (let i = 1; i <= 6; i++) {
+            await topButton.click();
+            await page.waitForSelector('#note-editor-container');
+            await page.fill('#note-title-input', `HOME LIST QA ${i}`);
+            await page.fill('#note-content-textarea', `home list content ${i}`);
+            await page.click('#editor-back-btn');
+            await page.waitForSelector('#note-list-container');
+          }
+
+          const expectedCards = initialCardCount + 6;
+          const cardCount = await page.locator('[data-note-card="true"]').count();
+          fail(cardCount !== expectedCards, `Expected all ${expectedCards} notes to be rendered, found ${cardCount}`);
+          const lastCard = page.locator('[data-note-card="true"]').last();
+          await lastCard.scrollIntoViewIfNeeded();
+          fail(!(await lastCard.isVisible()), 'The last memo cannot be reached in the home list');
+          await page.screenshot({ path: 'home-task-artifacts/home-all-notes.png', fullPage: true });
+
+          await topButton.click();
+          await page.waitForSelector('#note-editor-container');
+          await page.fill('#note-title-input', 'TASK DELETE SAFETY QA');
+          await page.fill('#new-task-text-input', '消してはいけないテスト');
+          await page.click('#add-task-btn');
+          await page.waitForTimeout(100);
+
+          const taskMore = page.locator('[id^="task-more-btn-"]').first();
+          fail(await taskMore.count() !== 1, 'Task does not have a safe More menu');
+          fail(await page.locator('[id^="task-delete-btn-"]').count() !== 0, 'Delete action is exposed before opening the task menu');
+          await taskMore.click();
+          const deleteButton = page.locator('[id^="task-delete-btn-"]').first();
+          fail(await deleteButton.count() !== 1, 'Task delete action is not inside the More menu');
+          await page.screenshot({ path: 'home-task-artifacts/task-delete-menu.png', fullPage: true });
+
+          let dialogSeen = false;
+          page.once('dialog', async dialog => {
+            dialogSeen = true;
+            await dialog.dismiss();
+          });
+          await deleteButton.click();
+          await page.waitForTimeout(100);
+          fail(!dialogSeen, 'Task deletion did not ask for confirmation');
+          fail(!(await page.getByText('消してはいけないテスト', { exact: true }).count()), 'Task was deleted even after cancelling confirmation');
+
+          await taskMore.click();
+          page.once('dialog', async dialog => { await dialog.accept(); });
+          await page.locator('[id^="task-delete-btn-"]').first().click();
+          await page.waitForTimeout(100);
+          fail(!!(await page.getByText('消してはいけないテスト', { exact: true }).count()), 'Task remained after explicit confirmed deletion');
+
+          const source = fs.readFileSync('src/components/NoteEditor.tsx', 'utf8');
+          fail(source.includes('onClick={() => handleDeleteTask(task.id)}'), 'Immediate one-tap task delete handler still exists');
+
+          fs.writeFileSync('home-task-artifacts/findings.json', JSON.stringify({ failures, cardCount, expectedCards }, null, 2));
+          console.log(JSON.stringify({ failures, cardCount, expectedCards }, null, 2));
+          await browser.close();
+          if (failures.length) process.exit(1);
+          EOF
+          node home-task-regression.mjs
+
+      - name: Upload UX evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: home-task-safety-regression
+          path: home-task-artifacts/
