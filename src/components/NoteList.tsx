@@ -109,14 +109,14 @@ export const NoteList: React.FC<NoteListProps> = ({
   const finishNoteSwipe = (noteId: string, e: React.PointerEvent<HTMLDivElement>) => {
     const state = swipeRef.current;
     if (!state || state.noteId !== noteId || state.pointerId !== e.pointerId) return;
-    const shouldTrash = state.dragging && state.offset <= -72;
+    const shouldRevealTrash = state.dragging && state.offset <= -52;
     if (state.dragging) {
       suppressClickRef.current = { noteId, until: Date.now() + 700 };
     }
     swipeRef.current = null;
     setActiveSwipeNoteId(null);
-    setSwipeOffsets((prev) => ({ ...prev, [noteId]: shouldTrash ? -116 : 0 }));
-    if (shouldTrash) onMoveToTrash(noteId);
+    // A swipe only reveals the destructive action. It never deletes by itself.
+    setSwipeOffsets((prev) => ({ ...prev, [noteId]: shouldRevealTrash ? -116 : 0 }));
   };
 
   const cancelNoteSwipe = (noteId: string) => {
@@ -461,13 +461,20 @@ export const NoteList: React.FC<NoteListProps> = ({
 
     return (
       <div key={note.id} className="relative overflow-hidden" data-swipe-note-shell={note.id}>
-        <div
-          className="absolute inset-y-0 right-0 w-28 bg-rose-600 text-white flex flex-col items-center justify-center gap-1 select-none"
-          aria-hidden="true"
+        <button
+          type="button"
+          data-swipe-trash-button={note.id}
+          aria-label={`${note.title || '無題のメモ'}をゴミ箱へ移動`}
+          onClick={(e) => {
+            e.stopPropagation();
+            setSwipeOffsets((prev) => ({ ...prev, [note.id]: 0 }));
+            onMoveToTrash(note.id);
+          }}
+          className="absolute inset-y-0 right-0 w-28 bg-rose-600 text-white flex flex-col items-center justify-center gap-1 select-none active:bg-rose-700 transition-colors"
         >
           <Trash2 className="w-5 h-5" />
           <span className="text-sm font-bold">ゴミ箱</span>
-        </div>
+        </button>
         <div
           data-note-card="true"
           data-note-id={note.id}
