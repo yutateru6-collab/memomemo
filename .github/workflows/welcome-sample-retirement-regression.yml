@@ -1,0 +1,175 @@
+name: Welcome Sample Retirement Regression
+
+on:
+  push:
+    branches:
+      - main
+      - fix/remove-welcome-sample-20260906
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  welcome-retirement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run build
+      - name: Install browser QA
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Start app
+        run: |
+          bun run dev > /tmp/memomemo-welcome-retirement.log 2>&1 &
+          for i in {1..40}; do
+            curl -fsS http://127.0.0.1:3000 >/dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/memomemo-welcome-retirement.log
+          exit 1
+      - name: Verify fresh launch, existing-device migration, and cloud non-resurrection
+        run: |
+          mkdir -p welcome-retirement-artifacts
+          cat > welcome-retirement.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+
+          const browser = await chromium.launch({ headless: true });
+          const failures = [];
+          const fail = (condition, message) => { if (condition) failures.push(message); };
+          const baseURL = 'http://127.0.0.1:3000';
+          const welcomeTitle = 'iOS Notes へようこそ 📝';
+          const userTitle = 'ユーザーの大事なメモ';
+
+          const note = (id, title, version = 1) => ({
+            id,
+            title,
+            content: `${title} の本文`,
+            tags: [],
+            tasks: [],
+            attachments: [],
+            createdAt: Date.now() - 1000,
+            updatedAt: Date.now(),
+            version,
+          });
+
+          // 1) Fresh launch: retired welcome sample must not be seeded or shown.
+          {
+            const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+            const page = await context.newPage();
+            await page.goto(baseURL, { waitUntil: 'networkidle' });
+            await page.waitForSelector('#note-list-container');
+            fail((await page.getByText(welcomeTitle, { exact: true }).count()) !== 0, 'Fresh launch still shows the retired welcome sample');
+            fail((await page.getByText('週末の買い物リスト 🛒', { exact: true }).count()) !== 1, 'Remaining non-retired sample unexpectedly disappeared');
+            fail((await page.getByText('ピン留め', { exact: true }).count()) !== 0, 'Home still shows a pinned section caused by the retired welcome sample');
+            await page.screenshot({ path: 'welcome-retirement-artifacts/fresh-home-without-welcome.png', fullPage: true });
+            await context.close();
+          }
+
+          // 2) Existing-device migration: remove only sample-welcome and preserve user notes.
+          {
+            const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+            const page = await context.newPage();
+            await page.goto(baseURL, { waitUntil: 'networkidle' });
+            await page.waitForSelector('#note-list-container');
+
+            await page.evaluate(async ({ welcomeTitle, userTitle }) => {
+              const open = () => new Promise((resolve, reject) => {
+                const request = indexedDB.open('ios_notes_db', 1);
+                request.onupgradeneeded = () => {
+                  const db = request.result;
+                  if (!db.objectStoreNames.contains('notes')) db.createObjectStore('notes', { keyPath: 'id' });
+                };
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+              });
+              const db = await open();
+              await new Promise((resolve, reject) => {
+                const tx = db.transaction('notes', 'readwrite');
+                const store = tx.objectStore('notes');
+                store.clear();
+                const now = Date.now();
+                store.put({ id:'sample-welcome', title:welcomeTitle, content:'legacy sample', tags:[], tasks:[], attachments:[], isPinned:true, createdAt:now-2000, updatedAt:now-1000, version:3 });
+                store.put({ id:'user-preserved', title:userTitle, content:'絶対に消してはいけない', tags:['本人'], tasks:[], attachments:[], createdAt:now-1000, updatedAt:now, version:5 });
+                tx.oncomplete = resolve;
+                tx.onerror = () => reject(tx.error);
+              });
+              localStorage.setItem('ios_notes_initialized_v1', '1');
+            }, { welcomeTitle, userTitle });
+
+            await page.reload({ waitUntil: 'networkidle' });
+            await page.waitForSelector('#note-list-container');
+            await page.waitForTimeout(500);
+            fail((await page.getByText(welcomeTitle, { exact: true }).count()) !== 0, 'Existing-device migration left the welcome sample visible');
+            fail((await page.getByText(userTitle, { exact: true }).count()) !== 1, 'Existing-device migration removed or hid a user-created note');
+
+            const state = await page.evaluate(async () => {
+              const db = await new Promise((resolve, reject) => {
+                const request = indexedDB.open('ios_notes_db', 1);
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+              });
+              const notes = await new Promise((resolve, reject) => {
+                const request = db.transaction('notes', 'readonly').objectStore('notes').getAll();
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+              });
+              const tombstones = JSON.parse(localStorage.getItem('memomemo_cloud_tombstones_v1') || '[]');
+              return { ids: notes.map((n) => n.id), tombstones };
+            });
+            fail(state.ids.includes('sample-welcome'), 'Retired welcome sample still exists in IndexedDB after migration');
+            fail(!state.ids.includes('user-preserved'), 'User note was removed from IndexedDB during migration');
+            fail(!state.tombstones.some((t) => t.id === 'sample-welcome' && t.version >= 4), 'Migration did not record a cloud tombstone for the retired sample');
+            await page.screenshot({ path: 'welcome-retirement-artifacts/existing-user-migrated.png', fullPage: true });
+            await context.close();
+          }
+
+          // 3) Legacy/plaintext cloud response must never resurrect sample-welcome.
+          {
+            const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+            const page = await context.newPage();
+            const remoteUserTitle = 'クラウドから来た通常メモ';
+            await page.route('https://qa.invalid/retired', async route => {
+              await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ notes: [note('sample-welcome', welcomeTitle, 20), note('remote-normal', remoteUserTitle, 2)] }),
+              });
+            });
+            await page.goto(baseURL, { waitUntil: 'networkidle' });
+            await page.waitForSelector('#note-list-container');
+            await page.click('#cloudflare-header-btn');
+            await page.fill('#cf-worker-url-input', 'https://qa.invalid/retired');
+            await page.click('#cf-sync-now-btn');
+            await page.waitForTimeout(800);
+            await page.click('#close-cloudflare-modal-btn');
+            fail((await page.getByText(welcomeTitle, { exact: true }).count()) !== 0, 'Cloud sync resurrected the retired welcome sample');
+            fail((await page.getByText(remoteUserTitle, { exact: true }).count()) !== 1, 'Normal cloud note was incorrectly filtered while blocking the retired sample');
+            const tombstoned = await page.evaluate(() => JSON.parse(localStorage.getItem('memomemo_cloud_tombstones_v1') || '[]').some((t) => t.id === 'sample-welcome' && t.version >= 21));
+            fail(!tombstoned, 'Cloud-returned retired sample did not create a newer tombstone for the next sync');
+            await page.screenshot({ path: 'welcome-retirement-artifacts/cloud-cannot-resurrect-welcome.png', fullPage: true });
+            await context.close();
+          }
+
+          fs.writeFileSync('welcome-retirement-artifacts/findings.json', JSON.stringify({ failures }, null, 2));
+          console.log(JSON.stringify({ failures }, null, 2));
+          await browser.close();
+          if (failures.length) process.exit(1);
+          EOF
+          node welcome-retirement.mjs
+      - name: Upload retirement evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: welcome-sample-retirement-regression
+          path: welcome-retirement-artifacts/

@@ -228,13 +228,13 @@ jobs:
             const { context, page, errors } = await newPage('malformed-import');
             const dialogs = [];
             page.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.accept(); });
-            const originalVisible = await page.getByText('iOS Notes へようこそ 📝', { exact: true }).count();
+            const originalVisible = await page.getByText('週末の買い物リスト 🛒', { exact: true }).count();
             await page.click('#cloudflare-header-btn');
             const importInput = page.locator('input[type="file"][accept=".json"]');
             await importInput.setInputFiles({ name: 'malformed-notes.json', mimeType: 'application/json', buffer: Buffer.from('[{}]') });
             await page.waitForTimeout(600);
             const stillAlive = await page.locator('#note-list-container').count();
-            const stillOriginal = await page.getByText('iOS Notes へようこそ 📝', { exact: true }).count();
+            const stillOriginal = await page.getByText('週末の買い物リスト 🛒', { exact: true }).count();
             if (!originalVisible || !stillAlive || !stillOriginal) findings.push({ severity: 'critical', probe: 'malformed-import', detail: 'Malformed backup changed or destabilized the current notebook.' });
             if (!dialogs.some(text => text.includes('正しいバックアップ形式ではありません'))) findings.push({ severity: 'medium', probe: 'malformed-import-message', detail: 'The user was not given a clear rejection message.' });
             await page.screenshot({ path: 'qa-artifacts/malformed-import.png', fullPage: true });
@@ -253,7 +253,7 @@ jobs:
             await page.click('#close-cloudflare-modal-btn');
             await page.reload({ waitUntil: 'networkidle' });
             await page.waitForSelector('#note-list-container');
-            const sampleReturned = await page.getByText('iOS Notes へようこそ 📝', { exact: true }).count();
+            const sampleReturned = await page.getByText('週末の買い物リスト 🛒', { exact: true }).count();
             const zeroCount = await page.getByText('0 件のメモ', { exact: true }).count();
             if (sampleReturned || !zeroCount) findings.push({ severity: 'high', probe: 'empty-notebook-persistence', detail: 'An intentionally empty notebook was repopulated after reload.' });
             if (errors.length) findings.push({ severity: 'high', probe: 'empty-notebook-runtime', detail: errors.join(' | ') });
@@ -263,7 +263,7 @@ jobs:
           // 10) datetime-local values must represent local time, not UTC shifted by 9 hours.
           {
             const { context, page, errors } = await newPage('local-time');
-            await page.getByText('iOS Notes へようこそ 📝', { exact: true }).click();
+            await page.getByText('週末の買い物リスト 🛒', { exact: true }).click();
             await page.waitForSelector('#note-editor-container');
             await page.click('#editor-more-btn');
             await page.waitForSelector('#editor-more-menu');
@@ -271,7 +271,7 @@ jobs:
             const dueInput = page.locator('#note-editor-container input[type="datetime-local"]').first();
             const dueValue = await dueInput.inputValue();
             const hoursUntilDue = await page.evaluate((value) => (new Date(value).getTime() - Date.now()) / 3600000, dueValue);
-            if (hoursUntilDue < 20 || hoursUntilDue > 28) findings.push({ severity: 'high', probe: 'datetime-local-timezone', detail: `Expected about 24h until sample reminder, got ${hoursUntilDue.toFixed(1)}h.` });
+            if (hoursUntilDue < 3 || hoursUntilDue > 7) findings.push({ severity: 'high', probe: 'datetime-local-timezone', detail: `Expected about 5h until sample reminder, got ${hoursUntilDue.toFixed(1)}h.` });
             if (errors.length) findings.push({ severity: 'high', probe: 'local-time-runtime', detail: errors.join(' | ') });
             await context.close();
           }

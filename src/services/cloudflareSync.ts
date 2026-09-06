@@ -9,8 +9,10 @@ import {
   isValidSyncCode,
   loadTombstones,
   mergeRemoteTombstones,
+  saveTombstones,
   SyncTombstone,
 } from './cloudVault';
+import { filterRetiredSampleNotes, isRetiredSampleNoteId } from './retiredSamples';
 
 export interface CloudflareSyncResult {
   success: boolean;
@@ -56,6 +58,7 @@ export function mergeNotesWithCloudState(
   const byId = new Map<string, Note>();
 
   for (const note of [...remoteNotes, ...localNotes]) {
+    if (isRetiredSampleNoteId(note.id)) continue;
     const existing = byId.get(note.id);
     if (
       !existing ||
@@ -197,7 +200,15 @@ export async function syncWithCloudflare(
         if (!parsed || parsed.length !== 1) {
           return { success: false, error: 'クラウドのメモデータが破損しています。' };
         }
-        remoteNotes.push(parsed[0]);
+        const remoteNote = parsed[0];
+        if (isRetiredSampleNoteId(remoteNote.id)) {
+          saveTombstones([
+            ...loadTombstones(),
+            { id: remoteNote.id, deletedAt: Date.now(), version: Math.max(entry.version, remoteNote.version || 1) + 1 },
+          ]);
+          continue;
+        }
+        remoteNotes.push(remoteNote);
       }
 
       mergeRemoteTombstones(remoteTombstones);
@@ -212,7 +223,19 @@ export async function syncWithCloudflare(
           error: '同期先から不正なメモデータが返されました。ローカルの内容は上書きしていません。',
         };
       }
-      return { success: true, remoteNotes: parsedRemoteNotes, remoteTombstones: [] };
+      for (const remoteNote of parsedRemoteNotes) {
+        if (isRetiredSampleNoteId(remoteNote.id)) {
+          saveTombstones([
+            ...loadTombstones(),
+            { id: remoteNote.id, deletedAt: Date.now(), version: (remoteNote.version || 1) + 1 },
+          ]);
+        }
+      }
+      return {
+        success: true,
+        remoteNotes: filterRetiredSampleNotes(parsedRemoteNotes),
+        remoteTombstones: [],
+      };
     }
 
     if (data && typeof data === 'object' && (data as { success?: unknown }).success === true) {
