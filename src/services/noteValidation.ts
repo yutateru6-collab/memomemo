@@ -64,6 +64,7 @@ function parseNote(value: unknown): Note | null {
   if (!isValidOptionalDate(value.dueDate)) return null;
   if (value.reminderActive !== undefined && typeof value.reminderActive !== 'boolean') return null;
   if (value.isPinned !== undefined && typeof value.isPinned !== 'boolean') return null;
+  if (value.trashedAt !== undefined && !isFiniteNumber(value.trashedAt)) return null;
 
   const tasks = value.tasks.map(parseTask);
   if (tasks.some((task) => task === null)) return null;
@@ -81,6 +82,7 @@ function parseNote(value: unknown): Note | null {
     ...(value.dueDate ? { dueDate: value.dueDate } : {}),
     ...(value.reminderActive !== undefined ? { reminderActive: value.reminderActive as boolean } : {}),
     ...(value.isPinned !== undefined ? { isPinned: value.isPinned as boolean } : {}),
+    ...(value.trashedAt !== undefined ? { trashedAt: value.trashedAt as number } : {}),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     version: value.version,

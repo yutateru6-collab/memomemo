@@ -3,6 +3,7 @@ import { Note, FilterState, CloudflareSyncConfig, ThemeMode } from '../types';
 import {
   Search,
   X,
+  Trash2,
   Pin,
   SquarePen,
   Cloud,
@@ -21,6 +22,9 @@ interface NoteListProps {
   selectedNoteId: string | null;
   onSelectNote: (note: Note) => void;
   onCreateNewNote: () => void;
+  onMoveToTrash: (noteId: string) => void;
+  onOpenTrashModal: () => void;
+  trashCount: number;
   filters: FilterState;
   onUpdateFilters: (filters: FilterState) => void;
   allTags: string[];
@@ -38,6 +42,9 @@ export const NoteList: React.FC<NoteListProps> = ({
   selectedNoteId,
   onSelectNote,
   onCreateNewNote,
+  onMoveToTrash,
+  onOpenTrashModal,
+  trashCount,
   filters,
   onUpdateFilters,
   allTags,
@@ -49,6 +56,75 @@ export const NoteList: React.FC<NoteListProps> = ({
   isOnline,
   totalPendingTasksCount,
 }) => {
+  const [swipeOffsets, setSwipeOffsets] = React.useState<Record<string, number>>({});
+  const [activeSwipeNoteId, setActiveSwipeNoteId] = React.useState<string | null>(null);
+  const swipeRef = React.useRef<{
+    noteId: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    offset: number;
+    dragging: boolean;
+  } | null>(null);
+  const suppressClickRef = React.useRef<{ noteId: string; until: number } | null>(null);
+
+  const beginNoteSwipe = (noteId: string, e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    swipeRef.current = {
+      noteId,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      offset: 0,
+      dragging: false,
+    };
+  };
+
+  const moveNoteSwipe = (noteId: string, e: React.PointerEvent<HTMLDivElement>) => {
+    const state = swipeRef.current;
+    if (!state || state.noteId !== noteId || state.pointerId !== e.pointerId) return;
+    const dx = e.clientX - state.startX;
+    const dy = e.clientY - state.startY;
+
+    if (!state.dragging) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      if (Math.abs(dy) >= Math.abs(dx)) {
+        swipeRef.current = null;
+        return;
+      }
+      if (dx > 0) {
+        swipeRef.current = null;
+        return;
+      }
+      state.dragging = true;
+      setActiveSwipeNoteId(noteId);
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    }
+
+    const offset = Math.max(-116, Math.min(0, dx));
+    state.offset = offset;
+    setSwipeOffsets((prev) => ({ ...prev, [noteId]: offset }));
+  };
+
+  const finishNoteSwipe = (noteId: string, e: React.PointerEvent<HTMLDivElement>) => {
+    const state = swipeRef.current;
+    if (!state || state.noteId !== noteId || state.pointerId !== e.pointerId) return;
+    const shouldTrash = state.dragging && state.offset <= -72;
+    if (state.dragging) {
+      suppressClickRef.current = { noteId, until: Date.now() + 700 };
+    }
+    swipeRef.current = null;
+    setActiveSwipeNoteId(null);
+    setSwipeOffsets((prev) => ({ ...prev, [noteId]: shouldTrash ? -116 : 0 }));
+    if (shouldTrash) onMoveToTrash(noteId);
+  };
+
+  const cancelNoteSwipe = (noteId: string) => {
+    if (swipeRef.current?.noteId === noteId) swipeRef.current = null;
+    setActiveSwipeNoteId(null);
+    setSwipeOffsets((prev) => ({ ...prev, [noteId]: 0 }));
+  };
+
   // Filter logic
   const filteredNotes = notes.filter((note) => {
     // 1. Search Query
@@ -129,6 +205,22 @@ export const NoteList: React.FC<NoteListProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5">
+            <button
+              id="trash-header-btn"
+              type="button"
+              onClick={onOpenTrashModal}
+              className="justify-center items-center inline-flex min-h-11 min-w-11 relative p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors"
+              title="ゴミ箱（1時間で自動削除）"
+              aria-label={`ゴミ箱 ${trashCount}件`}
+            >
+              <Trash2 className="w-5 h-5 text-neutral-600 dark:text-neutral-400" />
+              {trashCount > 0 && (
+                <span className="absolute top-1 right-0 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                  {trashCount}
+                </span>
+              )}
+            </button>
+
             {/* Reminder Bell */}
             <button
               id="reminders-header-btn"
@@ -192,7 +284,7 @@ export const NoteList: React.FC<NoteListProps> = ({
             id="create-new-note-bottom-btn" data-testid="create-new-note-top-btn"
             type="button"
             onClick={onCreateNewNote}
-            className="w-full min-h-11 flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 active:bg-amber-300 text-black text-sm font-bold rounded-xl shadow-sm transition-all active:scale-[0.99]"
+            className="w-full min-h-11 flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 active:bg-amber-300 text-black text-base font-bold rounded-xl shadow-sm transition-all active:scale-[0.99]"
           >
             <SquarePen className="w-4 h-4" />
             <span>新規メモ</span>
@@ -208,7 +300,7 @@ export const NoteList: React.FC<NoteListProps> = ({
             placeholder="検索 (タイトル、内容、タグ、タスク)"
             value={filters.searchQuery}
             onChange={(e) => onUpdateFilters({ ...filters, searchQuery: e.target.value })}
-            className="min-h-11 w-full pl-9 pr-8 py-2 text-xs sm:text-sm bg-neutral-200/80 dark:bg-neutral-800/90 text-neutral-900 dark:text-white placeholder:text-neutral-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all"
+            className="min-h-11 w-full pl-9 pr-8 py-2 text-sm sm:text-base bg-neutral-200/80 dark:bg-neutral-800/90 text-neutral-900 dark:text-white placeholder:text-neutral-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all"
           />
           {filters.searchQuery && (
             <button
@@ -223,7 +315,7 @@ export const NoteList: React.FC<NoteListProps> = ({
         </div>
 
         {/* Tag & Filters Horizontal Scroller */}
-        <div className="flex items-center gap-1.5 overflow-x-auto py-2.5 no-scrollbar text-xs">
+        <div className="flex items-center gap-1.5 overflow-x-auto py-2.5 no-scrollbar text-sm">
           <button
             id="filter-tag-all"
             type="button"
@@ -298,7 +390,7 @@ export const NoteList: React.FC<NoteListProps> = ({
             </button>
           ))}
         </div>
-        <div className="pb-1 text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+        <div className="pb-1 text-sm font-medium text-neutral-500 dark:text-neutral-400">
           {notes.length} 件のメモ
         </div>
       </div>
@@ -307,8 +399,8 @@ export const NoteList: React.FC<NoteListProps> = ({
       <div className="safe-horizontal flex-1 overflow-y-auto px-4 py-2 pb-safe space-y-4">
         {filteredNotes.length === 0 ? (
           <div className="text-center py-16 text-neutral-400">
-            <p className="text-sm font-medium">一致するメモがありません</p>
-            <p className="text-xs mt-1">検索条件を変更するか、新しいメモを作成してください。</p>
+            <p className="text-base font-medium">一致するメモがありません</p>
+            <p className="text-sm mt-1">検索条件を変更するか、新しいメモを作成してください。</p>
             <button
               type="button"
               onClick={onCreateNewNote}
@@ -322,7 +414,7 @@ export const NoteList: React.FC<NoteListProps> = ({
             {/* Pinned Section */}
             {pinnedNotes.length > 0 && (
               <div className="space-y-1.5">
-                <div className="flex items-center gap-1 px-2 text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
+                <div className="flex items-center gap-1 px-2 text-sm font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
                   <Pin className="w-3 h-3 text-amber-500 fill-amber-500" />
                   <span>ピン留め</span>
                 </div>
@@ -336,7 +428,7 @@ export const NoteList: React.FC<NoteListProps> = ({
             {unpinnedNotes.length > 0 && (
               <div className="space-y-1.5">
                 {pinnedNotes.length > 0 && (
-                  <div className="px-2 text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
+                  <div className="px-2 text-sm font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
                     メモ
                   </div>
                 )}
@@ -364,78 +456,97 @@ export const NoteList: React.FC<NoteListProps> = ({
       ) ||
       (note.dueDate && new Date(note.dueDate).getTime() < Date.now());
 
+    const swipeOffset = swipeOffsets[note.id] || 0;
+    const isActivelySwiping = activeSwipeNoteId === note.id;
+
     return (
-      <div
-        key={note.id}
-        data-note-card="true"
-        data-note-id={note.id}
-        onClick={() => onSelectNote(note)}
-        className={`p-3.5 cursor-pointer transition-colors active:bg-neutral-100 dark:active:bg-neutral-800 ${
-          isSelected
-            ? 'bg-amber-500/10 dark:bg-amber-500/15'
-            : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
-        }`}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <h2 className="text-sm font-semibold text-neutral-900 dark:text-white truncate flex-1">
-            {note.title || '無題のメモ'}
-          </h2>
-          <span className="text-[11px] text-neutral-400 shrink-0 font-normal">
-            {formatNoteDate(note.updatedAt)}
-          </span>
+      <div key={note.id} className="relative overflow-hidden" data-swipe-note-shell={note.id}>
+        <div
+          className="absolute inset-y-0 right-0 w-28 bg-rose-600 text-white flex flex-col items-center justify-center gap-1 select-none"
+          aria-hidden="true"
+        >
+          <Trash2 className="w-5 h-5" />
+          <span className="text-sm font-bold">ゴミ箱</span>
         </div>
-
-        {/* Snippet */}
-        <p className="text-xs text-neutral-500 dark:text-neutral-400 line-clamp-2 mt-0.5 leading-relaxed">
-          {cleanSnippet(note.content)}
-        </p>
-
-        {/* Metadata Footer: Tags, Task Counter, Attachments, Reminders */}
-        <div className="flex flex-wrap items-center gap-2 mt-2 pt-1">
-          {/* Tags */}
-          {note.tags.slice(0, 3).map((tag) => (
-            <span
-              key={tag}
-              className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-amber-600 dark:text-amber-400 font-medium"
-            >
-              #{tag}
+        <div
+          data-note-card="true"
+          data-note-id={note.id}
+          onPointerDown={(e) => beginNoteSwipe(note.id, e)}
+          onPointerMove={(e) => moveNoteSwipe(note.id, e)}
+          onPointerUp={(e) => finishNoteSwipe(note.id, e)}
+          onPointerCancel={() => cancelNoteSwipe(note.id)}
+          onClick={() => {
+            const suppressed = suppressClickRef.current;
+            if (suppressed?.noteId === note.id && suppressed.until > Date.now()) return;
+            onSelectNote(note);
+          }}
+          style={{
+            transform: `translateX(${swipeOffset}px)`,
+            touchAction: 'pan-y',
+          }}
+          className={`relative p-4 cursor-pointer bg-white dark:bg-[#1c1c1e] ${
+            isActivelySwiping ? '' : 'transition-transform duration-200 ease-out'
+          } transition-colors active:bg-neutral-100 dark:active:bg-neutral-800 ${
+            isSelected
+              ? 'bg-amber-500/10 dark:bg-amber-500/15'
+              : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <h2 className="text-base font-semibold text-neutral-900 dark:text-white truncate flex-1">
+              {note.title || '無題のメモ'}
+            </h2>
+            <span className="text-xs text-neutral-400 shrink-0 font-normal">
+              {formatNoteDate(note.updatedAt)}
             </span>
-          ))}
+          </div>
 
-          {/* Tasks Indicator */}
-          {totalTasks > 0 && (
-            <span
-              className={`text-[10px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md ${
-                completedTasks === totalTasks
-                  ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
-                  : 'text-amber-600 dark:text-amber-400 bg-amber-500/10 font-medium'
-              }`}
-            >
-              <CheckCircle2 className="w-3 h-3" />
-              {completedTasks}/{totalTasks}
-            </span>
-          )}
+          <p className="text-sm text-neutral-500 dark:text-neutral-400 line-clamp-2 mt-1 leading-relaxed">
+            {cleanSnippet(note.content)}
+          </p>
 
-          {/* Attachments Indicator */}
-          {note.attachments.length > 0 && (
-            <span className="text-[10px] inline-flex items-center gap-0.5 text-neutral-500 dark:text-neutral-400">
-              <Paperclip className="w-3 h-3" />
-              {note.attachments.length}
-            </span>
-          )}
+          <div className="flex flex-wrap items-center gap-2 mt-2.5 pt-1">
+            {note.tags.slice(0, 3).map((tag) => (
+              <span
+                key={tag}
+                className="text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-amber-600 dark:text-amber-400 font-medium"
+              >
+                #{tag}
+              </span>
+            ))}
 
-          {/* Overdue or Due Date Indicator */}
-          {hasOverdue ? (
-            <span className="text-[10px] inline-flex items-center gap-0.5 text-rose-500 font-medium bg-rose-500/10 px-1.5 py-0.5 rounded-md">
-              <AlertCircle className="w-3 h-3" />
-              期限超過
-            </span>
-          ) : note.dueDate ? (
-            <span className="text-[10px] inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
-              <Clock className="w-3 h-3" />
-              {new Date(note.dueDate).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })}
-            </span>
-          ) : null}
+            {totalTasks > 0 && (
+              <span
+                className={`text-xs inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md ${
+                  completedTasks === totalTasks
+                    ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
+                    : 'text-amber-600 dark:text-amber-400 bg-amber-500/10 font-medium'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                {completedTasks}/{totalTasks}
+              </span>
+            )}
+
+            {note.attachments.length > 0 && (
+              <span className="text-xs inline-flex items-center gap-0.5 text-neutral-500 dark:text-neutral-400">
+                <Paperclip className="w-3.5 h-3.5" />
+                {note.attachments.length}
+              </span>
+            )}
+
+            {hasOverdue ? (
+              <span className="text-xs inline-flex items-center gap-0.5 text-rose-500 font-medium bg-rose-500/10 px-1.5 py-0.5 rounded-md">
+                <AlertCircle className="w-3.5 h-3.5" />
+                期限超過
+              </span>
+            ) : note.dueDate ? (
+              <span className="text-xs inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
+                <Clock className="w-3.5 h-3.5" />
+                {new Date(note.dueDate).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })}
+              </span>
+            ) : null}
+          </div>
         </div>
       </div>
     );

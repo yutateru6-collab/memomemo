@@ -344,7 +344,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           id="editor-back-btn"
           type="button"
           onClick={() => void handleBackSafely()}
-          className="min-h-11 px-1.5 -ml-1 flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-semibold text-sm hover:opacity-80 active:opacity-60 transition-opacity"
+          className="min-h-11 px-1.5 -ml-1 flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-semibold text-base hover:opacity-80 active:opacity-60 transition-opacity"
         >
           <ChevronLeft className="w-5 h-5" />
           <span>メモ一覧</span>
@@ -356,7 +356,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             type="button"
             onClick={() => void handleManualSaveClick()}
             disabled={saveState === 'saving'}
-            className="min-h-11 px-3 inline-flex items-center gap-1.5 rounded-xl text-sm font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 active:bg-amber-500/20 disabled:opacity-60 transition-colors"
+            className="min-h-11 px-3 inline-flex items-center gap-1.5 rounded-xl text-base font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 active:bg-amber-500/20 disabled:opacity-60 transition-colors"
           >
             <Save className="w-4 h-4" />
             <span>{saveState === 'saving' ? '保存中' : '保存'}</span>
@@ -386,7 +386,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                     setShowMoreMenu(false);
                     fileInputRef.current?.click();
                   }}
-                  className="w-full min-h-11 px-4 flex items-center gap-3 text-sm text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  className="w-full min-h-11 px-4 flex items-center gap-3 text-base text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
                 >
                   <Paperclip className="w-4 h-4 text-amber-500" />
                   画像・PDFを添付
@@ -398,7 +398,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                     setShowMoreMenu(false);
                     setShowReminderSetting(true);
                   }}
-                  className="w-full min-h-11 px-4 flex items-center gap-3 text-sm text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  className="w-full min-h-11 px-4 flex items-center gap-3 text-base text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
                 >
                   <Clock className="w-4 h-4 text-amber-500" />
                   リマインダー
@@ -410,7 +410,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                     handleTogglePin();
                     setShowMoreMenu(false);
                   }}
-                  className="w-full min-h-11 px-4 flex items-center gap-3 text-sm text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  className="w-full min-h-11 px-4 flex items-center gap-3 text-base text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
                 >
                   <Pin className={`w-4 h-4 ${note.isPinned ? 'fill-current text-amber-500' : 'text-neutral-500'}`} />
                   {note.isPinned ? 'ピン留めを解除' : 'ピン留め'}
@@ -420,12 +420,12 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                   type="button"
                   onClick={() => {
                     setShowMoreMenu(false);
-                    if (confirm('このメモを削除しますか？')) onDeleteNote(note.id);
+                    if (confirm('このメモをゴミ箱に移動しますか？1時間以内なら復元できます。')) onDeleteNote(note.id);
                   }}
-                  className="w-full min-h-11 px-4 flex items-center gap-3 text-sm text-left text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                  className="w-full min-h-11 px-4 flex items-center gap-3 text-base text-left text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
                 >
                   <Trash2 className="w-4 h-4" />
-                  メモを削除
+                  ゴミ箱に移動
                 </button>
               </div>
             )}

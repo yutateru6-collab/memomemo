@@ -25,6 +25,8 @@ export interface Note {
   dueDate?: string; // ISO string for reminder/deadline
   reminderActive?: boolean;
   isPinned?: boolean;
+  /** Timestamp when the note was moved to Trash. Missing means active. */
+  trashedAt?: number;
   createdAt: number;
   updatedAt: number;
   version: number;
