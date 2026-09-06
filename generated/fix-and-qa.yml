@@ -1,0 +1,296 @@
+name: Memomemo Regression QA
+
+on:
+  push:
+    branches:
+      - main
+      - 'fix/memomemo-*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript check
+        run: bun run lint
+
+      - name: Production build
+        run: bun run build
+
+      - name: Install Chromium QA dependency
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Start Vite app
+        run: |
+          bun run dev > /tmp/memomemo-vite.log 2>&1 &
+          echo $! > /tmp/memomemo-vite.pid
+          for i in {1..40}; do
+            if curl -fsS http://127.0.0.1:3000 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/memomemo-vite.log
+          exit 1
+
+      - name: User-flow browser QA
+        run: |
+          mkdir -p qa-artifacts
+          cat > qa-audit.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+
+          const baseURL = 'http://127.0.0.1:3000';
+          const findings = [];
+          const browser = await chromium.launch({ headless: true });
+          const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n8sAAAAASUVORK5CYII=', 'base64');
+
+          async function newPage(name, viewport = { width: 390, height: 844 }) {
+            const context = await browser.newContext({ viewport, timezoneId: 'Asia/Tokyo' });
+            const page = await context.newPage();
+            const errors = [];
+            page.on('pageerror', err => errors.push(`pageerror: ${err.message}`));
+            page.on('console', msg => {
+              if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`);
+            });
+            await page.goto(baseURL, { waitUntil: 'networkidle' });
+            await page.waitForSelector('#note-list-container');
+            return { context, page, errors, name };
+          }
+
+          // 1) Mobile baseline + no accidental horizontal overflow.
+          {
+            const { context, page, errors } = await newPage('baseline-mobile');
+            const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+            if (overflow > 1) findings.push({ severity: 'medium', probe: 'mobile-overflow', detail: `Horizontal overflow: ${overflow}px` });
+            await page.click('#theme-toggle-btn');
+            await page.click('#reminders-header-btn');
+            await page.waitForSelector('#reminders-modal-content');
+            await page.click('#close-reminders-modal-btn');
+            await page.click('#cloudflare-header-btn');
+            await page.waitForSelector('#cloudflare-modal-content');
+            await page.click('#close-cloudflare-modal-btn');
+            await page.screenshot({ path: 'qa-artifacts/baseline-mobile.png', fullPage: true });
+            if (errors.length) findings.push({ severity: 'high', probe: 'baseline-mobile', detail: errors.join(' | ') });
+            await context.close();
+          }
+
+          // 2) Desktop create/edit/task/preview smoke.
+          {
+            const { context, page, errors } = await newPage('baseline-desktop', { width: 1440, height: 1000 });
+            await page.click('#create-new-note-bottom-btn');
+            await page.waitForSelector('#note-editor-container');
+            await page.fill('#note-title-input', 'QA smoke note');
+            await page.fill('#note-content-textarea', '**Smoke test** content');
+            await page.fill('#new-task-text-input', 'QA task');
+            await page.click('#add-task-btn');
+            await page.click('#mode-preview-btn');
+            await page.waitForSelector('#note-markdown-rendered-view');
+            await page.screenshot({ path: 'qa-artifacts/baseline-desktop.png', fullPage: true });
+            if (errors.length) findings.push({ severity: 'high', probe: 'baseline-desktop', detail: errors.join(' | ') });
+            await context.close();
+          }
+
+          // 3) Persistence: latest typed note must survive reload.
+          {
+            const { context, page, errors } = await newPage('persistence', { width: 1280, height: 900 });
+            await page.click('#create-new-note-bottom-btn');
+            await page.fill('#note-title-input', 'PERSIST ME');
+            await page.fill('#note-content-textarea', 'This must survive a reload.');
+            await page.waitForTimeout(700);
+            await page.reload({ waitUntil: 'networkidle' });
+            await page.waitForSelector('#note-list-container');
+            const persisted = await page.getByText('PERSIST ME', { exact: true }).count();
+            if (!persisted) findings.push({ severity: 'critical', probe: 'reload-persistence', detail: 'A newly edited note disappeared after reload.' });
+            if (errors.length) findings.push({ severity: 'high', probe: 'persistence-runtime', detail: errors.join(' | ') });
+            await context.close();
+          }
+
+          // 4) Multiple attachments selected together must all survive.
+          {
+            const { context, page, errors } = await newPage('multi-attachment', { width: 1280, height: 900 });
+            await page.click('#create-new-note-bottom-btn');
+            await page.waitForSelector('#note-editor-container');
+            const input = page.locator('input[type="file"][multiple]');
+            await input.setInputFiles([
+              { name: 'qa-one.png', mimeType: 'image/png', buffer: png1x1 },
+              { name: 'qa-two.png', mimeType: 'image/png', buffer: png1x1 },
+            ]);
+            await page.waitForTimeout(800);
+            const attachmentCount = await page.locator('[title="拡大表示 / 開く"]').count();
+            if (attachmentCount !== 2) findings.push({ severity: 'critical', probe: 'multi-attachment', detail: `Expected 2 attachments, found ${attachmentCount}.` });
+            await page.screenshot({ path: 'qa-artifacts/multi-attachment.png', fullPage: true });
+            if (errors.length) findings.push({ severity: 'high', probe: 'multi-attachment-runtime', detail: errors.join(' | ') });
+            await context.close();
+          }
+
+          // 5) Manual sync must use the URL that was just entered, not stale parent state.
+          {
+            const { context, page, errors } = await newPage('manual-sync');
+            let requestCount = 0;
+            await page.route('https://qa.invalid/sync', async route => {
+              requestCount++;
+              const body = route.request().postDataJSON();
+              await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, count: body?.notes?.length ?? 0 }) });
+            });
+            await page.click('#cloudflare-header-btn');
+            await page.fill('#cf-worker-url-input', 'https://qa.invalid/sync');
+            await page.click('#cf-sync-now-btn');
+            await page.waitForTimeout(700);
+            if (requestCount !== 1) findings.push({ severity: 'high', probe: 'manual-sync-new-config', detail: `Expected 1 request to the newly entered URL, got ${requestCount}.` });
+            await page.screenshot({ path: 'qa-artifacts/manual-sync.png', fullPage: true });
+            if (errors.length) findings.push({ severity: 'high', probe: 'manual-sync-runtime', detail: errors.join(' | ') });
+            await context.close();
+          }
+
+          // 6) Auto-sync must send the latest edit and never roll the UI back.
+          {
+            const { context, page, errors } = await newPage('auto-sync', { width: 1280, height: 900 });
+            const capturedBodies = [];
+            await page.route('https://qa.invalid/autosync', async route => {
+              try { capturedBodies.push(route.request().postDataJSON()); } catch {}
+              await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, count: 1 }) });
+            });
+            await page.click('#cloudflare-header-btn');
+            await page.fill('#cf-worker-url-input', 'https://qa.invalid/autosync');
+            const autoToggle = page.locator('#cf-auto-sync-toggle');
+            if (!(await autoToggle.isChecked())) await autoToggle.check();
+            await page.click('#cf-save-btn');
+            await page.waitForTimeout(200);
+            await page.click('#close-cloudflare-modal-btn');
+            await page.click('#create-new-note-bottom-btn');
+            await page.fill('#note-title-input', 'FINAL AUTOSYNC TITLE');
+            await page.waitForTimeout(3800);
+            const sentFinal = capturedBodies.some(body => Array.isArray(body?.notes) && body.notes.some(n => n?.title === 'FINAL AUTOSYNC TITLE'));
+            const currentTitle = await page.locator('#note-title-input').inputValue();
+            if (!sentFinal) findings.push({ severity: 'critical', probe: 'auto-sync-latest-payload', detail: 'The latest title was not present in the debounced sync payload.' });
+            if (currentTitle !== 'FINAL AUTOSYNC TITLE') findings.push({ severity: 'critical', probe: 'auto-sync-no-rollback', detail: `Visible title rolled back to “${currentTitle}”.` });
+            await page.screenshot({ path: 'qa-artifacts/auto-sync.png', fullPage: true });
+            if (errors.length) findings.push({ severity: 'high', probe: 'auto-sync-runtime', detail: errors.join(' | ') });
+            await context.close();
+          }
+
+          // 7) A stale remote response must not overwrite a newer local note.
+          {
+            const { context, page, errors } = await newPage('stale-remote', { width: 1280, height: 900 });
+            await page.route('http://127.0.0.1:3000/api/sync', async route => {
+              await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, entries: [] }) });
+            });
+            await page.route('https://qa.invalid/stale', async route => {
+              const body = route.request().postDataJSON();
+              const notes = structuredClone(body?.notes ?? []);
+              const target = notes.find(n => n?.title === 'LOCAL WINS');
+              if (target) {
+                target.title = 'REMOTE OLD';
+                target.updatedAt = 1;
+                target.version = 1;
+              }
+              await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, notes }) });
+            });
+            await page.click('#create-new-note-bottom-btn');
+            await page.fill('#note-title-input', 'LOCAL WINS');
+            await page.waitForTimeout(300);
+            await page.click('#editor-back-btn');
+            await page.click('#cloudflare-header-btn');
+            await page.fill('#cf-worker-url-input', 'https://qa.invalid/stale');
+            await page.click('#cf-sync-now-btn');
+            await page.waitForTimeout(700);
+            await page.click('#close-cloudflare-modal-btn');
+            const localStillWins = await page.getByText('LOCAL WINS', { exact: true }).count();
+            if (!localStillWins) findings.push({ severity: 'critical', probe: 'stale-remote-no-rollback', detail: 'An older remote response replaced a newer local edit.' });
+            if (errors.length) findings.push({ severity: 'high', probe: 'stale-remote-runtime', detail: errors.join(' | ') });
+            await context.close();
+          }
+
+          // 8) Malformed backup must be rejected without altering current data or crashing.
+          {
+            const { context, page, errors } = await newPage('malformed-import');
+            const dialogs = [];
+            page.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.accept(); });
+            const originalVisible = await page.getByText('週末の買い物リスト 🛒', { exact: true }).count();
+            await page.click('#cloudflare-header-btn');
+            const importInput = page.locator('input[type="file"][accept=".json"]');
+            await importInput.setInputFiles({ name: 'malformed-notes.json', mimeType: 'application/json', buffer: Buffer.from('[{}]') });
+            await page.waitForTimeout(600);
+            const stillAlive = await page.locator('#note-list-container').count();
+            const stillOriginal = await page.getByText('週末の買い物リスト 🛒', { exact: true }).count();
+            if (!originalVisible || !stillAlive || !stillOriginal) findings.push({ severity: 'critical', probe: 'malformed-import', detail: 'Malformed backup changed or destabilized the current notebook.' });
+            if (!dialogs.some(text => text.includes('正しいバックアップ形式ではありません'))) findings.push({ severity: 'medium', probe: 'malformed-import-message', detail: 'The user was not given a clear rejection message.' });
+            await page.screenshot({ path: 'qa-artifacts/malformed-import.png', fullPage: true });
+            if (errors.length) findings.push({ severity: 'high', probe: 'malformed-import-runtime', detail: errors.join(' | ') });
+            await context.close();
+          }
+
+          // 9) Intentionally empty notebook must stay empty after reload (no sample resurrection).
+          {
+            const { context, page, errors } = await newPage('empty-notebook');
+            page.on('dialog', async dialog => { await dialog.accept(); });
+            await page.click('#cloudflare-header-btn');
+            const importInput = page.locator('input[type="file"][accept=".json"]');
+            await importInput.setInputFiles({ name: 'empty.json', mimeType: 'application/json', buffer: Buffer.from('[]') });
+            await page.waitForTimeout(700);
+            await page.click('#close-cloudflare-modal-btn');
+            await page.reload({ waitUntil: 'networkidle' });
+            await page.waitForSelector('#note-list-container');
+            const sampleReturned = await page.getByText('週末の買い物リスト 🛒', { exact: true }).count();
+            const zeroCount = await page.getByText('0 件のメモ', { exact: true }).count();
+            if (sampleReturned || !zeroCount) findings.push({ severity: 'high', probe: 'empty-notebook-persistence', detail: 'An intentionally empty notebook was repopulated after reload.' });
+            if (errors.length) findings.push({ severity: 'high', probe: 'empty-notebook-runtime', detail: errors.join(' | ') });
+            await context.close();
+          }
+
+          // 10) datetime-local values must represent local time, not UTC shifted by 9 hours.
+          {
+            const { context, page, errors } = await newPage('local-time');
+            await page.getByText('週末の買い物リスト 🛒', { exact: true }).click();
+            await page.waitForSelector('#note-editor-container');
+            await page.click('#editor-more-btn');
+            await page.waitForSelector('#editor-more-menu');
+            await page.click('#editor-reminder-btn');
+            const dueInput = page.locator('#note-editor-container input[type="datetime-local"]').first();
+            const dueValue = await dueInput.inputValue();
+            const hoursUntilDue = await page.evaluate((value) => (new Date(value).getTime() - Date.now()) / 3600000, dueValue);
+            if (hoursUntilDue < 3 || hoursUntilDue > 7) findings.push({ severity: 'high', probe: 'datetime-local-timezone', detail: `Expected about 5h until sample reminder, got ${hoursUntilDue.toFixed(1)}h.` });
+            if (errors.length) findings.push({ severity: 'high', probe: 'local-time-runtime', detail: errors.join(' | ') });
+            await context.close();
+          }
+
+          await browser.close();
+          fs.writeFileSync('qa-artifacts/findings.json', JSON.stringify(findings, null, 2));
+          console.log(JSON.stringify({ findingCount: findings.length, findings }, null, 2));
+          if (findings.length > 0) process.exit(1);
+          EOF
+          node qa-audit.mjs
+
+      - name: Print Vite log
+        if: always()
+        run: cat /tmp/memomemo-vite.log || true
+
+      - name: Upload QA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memomemo-regression-${{ github.run_number }}
+          path: qa-artifacts/
+          if-no-files-found: warn
