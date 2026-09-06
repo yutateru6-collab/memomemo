@@ -175,16 +175,6 @@ export const NoteList: React.FC<NoteListProps> = ({
     return d.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' });
   };
 
-  const cleanSnippet = (content: string) => {
-    return content
-      .replace(/^#+\s+/gm, '')
-      .replace(/[*_`~[\]]/g, '')
-      .replace(/<!--[\s\S]*?-->/g, '')
-      .trim()
-      .split('\n')
-      .find((line) => line.trim().length > 0) || '追加のテキストなし';
-  };
-
   return (
     <div
       id="note-list-container"
@@ -508,8 +498,11 @@ export const NoteList: React.FC<NoteListProps> = ({
             </span>
           </div>
 
-          <p className="text-sm text-neutral-500 dark:text-neutral-400 line-clamp-2 mt-1 leading-relaxed">
-            {cleanSnippet(note.content)}
+          <p
+            data-note-content-preview="true"
+            className="text-sm text-neutral-500 dark:text-neutral-400 line-clamp-4 mt-1 leading-relaxed whitespace-pre-wrap break-words"
+          >
+            {note.content || '追加のテキストなし'}
           </p>
 
           <div className="flex flex-wrap items-center gap-2 mt-2.5 pt-1">
