@@ -1,7 +1,8 @@
 import { Note, CloudflareSyncConfig } from '../types';
 import { toDateTimeLocalValue } from './dateTime';
 import { parseNotesArray, salvageNotesArray, sortNotesForDisplay } from './noteValidation';
-import { generateSyncCode } from './cloudVault';
+import { generateSyncCode, recordNoteDeletion } from './cloudVault';
+import { filterRetiredSampleNotes, isRetiredSampleNoteId } from './retiredSamples';
 
 const DB_NAME = 'ios_notes_db';
 const DB_VERSION = 1;
@@ -31,43 +32,15 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 // Initial sample notes showcasing features
+function migrateRetiredSampleNotes(notes: Note[]): Note[] {
+  const retired = notes.filter((note) => isRetiredSampleNoteId(note.id));
+  if (retired.length === 0) return notes;
+
+  for (const note of retired) recordNoteDeletion(note);
+  return filterRetiredSampleNotes(notes);
+}
+
 const INITIAL_NOTES: Note[] = [
-  {
-    id: 'sample-welcome',
-    title: 'iOS Notes へようこそ 📝',
-    content: `# シンプル＆高機能なメモアプリ
-
-iPhoneの使い心地をそのままウェブで実現したミニマルなメモ帳です。
-
-### 主な機能
-- **Markdown対応**: 見出し、**太字**、*イタリック*、リスト、コードブロック
-- **ToDo箇条書き**: 下のタスクリストでチェック可能
-- **期限＆プッシュ通知**: やってないことを逃さずリマインド
-- **タグ機能**: タグで瞬時にフィルタリング
-- **オフライン対応**: IndexedDBによる完全オフライン動作
-- **画像・PDF添付**: ファイルをドラッグ＆ドロップで保存
-- **Cloudflare同期**: Workers KVと連携してどこからでもアクセス
-
-\`\`\`javascript
-// マークダウンコードブロックも綺麗に表示されます
-console.log("Hello, iPhone Notes!");
-\`\`\`
-`,
-    tags: ['ガイド', 'アイデア'],
-    tasks: [
-      { id: 'task-1', text: '新しいメモを作成してみる', completed: true },
-      { id: 'task-2', text: 'チェックリストにタスクを追加する', completed: false, dueDate: toDateTimeLocalValue(Date.now() + 86400000) },
-      { id: 'task-3', text: '画像やPDFを添付してみる', completed: false },
-      { id: 'task-4', text: 'Cloudflare同期を設定する', completed: false }
-    ],
-    attachments: [],
-    dueDate: toDateTimeLocalValue(Date.now() + 86400000),
-    reminderActive: true,
-    isPinned: true,
-    createdAt: Date.now() - 3600000,
-    updatedAt: Date.now() - 1800000,
-    version: 1,
-  },
   {
     id: 'sample-shopping',
     title: '週末の買い物リスト 🛒',
@@ -101,9 +74,14 @@ export async function getAllNotes(): Promise<Note[]> {
       request.onsuccess = () => {
         const rawResult: unknown = request.result;
         const strictResult = parseNotesArray(rawResult);
-        const result = strictResult ?? salvageNotesArray(rawResult);
+        const parsedResult = strictResult ?? salvageNotesArray(rawResult);
+        const result = migrateRetiredSampleNotes(parsedResult);
 
-        if (strictResult === null && Array.isArray(rawResult) && rawResult.length > result.length) {
+        if (result.length !== parsedResult.length) {
+          void saveAllNotes(result).catch((err) => console.warn('Failed to persist retired sample migration', err));
+        }
+
+        if (strictResult === null && Array.isArray(rawResult) && rawResult.length > parsedResult.length) {
           console.warn('Corrupted local note entries were ignored during recovery.');
           if (result.length > 0) {
             void saveAllNotes(result).catch((err) => console.warn('Failed to persist recovered notes', err));
@@ -237,12 +215,19 @@ function getNotesFromLocalStorage(): Note[] {
 
     const parsed: unknown = JSON.parse(data);
     const strict = parseNotesArray(parsed);
-    if (strict) return strict;
+    if (strict) {
+      const migrated = migrateRetiredSampleNotes(strict);
+      if (migrated.length !== strict.length) {
+        localStorage.setItem('ios_notes_data', JSON.stringify(migrated));
+      }
+      return sortNotesForDisplay(migrated);
+    }
 
     const salvaged = salvageNotesArray(parsed);
     if (salvaged.length > 0) {
-      localStorage.setItem('ios_notes_data', JSON.stringify(salvaged));
-      return salvaged;
+      const migrated = migrateRetiredSampleNotes(salvaged);
+      localStorage.setItem('ios_notes_data', JSON.stringify(migrated));
+      return sortNotesForDisplay(migrated);
     }
 
     return [];
