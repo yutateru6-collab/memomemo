@@ -1,0 +1,219 @@
+name: Trash Swipe and Typography Regression
+
+on:
+  push:
+    branches:
+      - main
+      - feature/swipe-trash-1h-fonts-20260906
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  trash-swipe-font:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run build
+
+      - name: Install browser QA
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Start app
+        run: |
+          bun run dev > /tmp/memomemo-trash-qa.log 2>&1 &
+          for i in {1..40}; do
+            curl -fsS http://127.0.0.1:3000 >/dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/memomemo-trash-qa.log
+          exit 1
+
+      - name: Verify swipe, restore, one-hour purge, and readable type
+        run: |
+          mkdir -p trash-qa-artifacts
+          cat > trash-swipe-font-regression.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+
+          const browser = await chromium.launch({ headless: true });
+          const context = await browser.newContext({
+            viewport: { width: 390, height: 844 },
+            deviceScaleFactor: 3,
+            isMobile: true,
+            hasTouch: true,
+            userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+          });
+          const page = await context.newPage();
+          const failures = [];
+          const fail = (condition, message) => { if (condition) failures.push(message); };
+
+          await page.route('http://127.0.0.1:3000/api/sync', async (route) => {
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, entries: [] }) });
+          });
+
+          await page.goto('http://127.0.0.1:3000', { waitUntil: 'networkidle' });
+          await page.waitForSelector('#note-list-container');
+
+          async function createNote(title, content) {
+            await page.click('[data-testid="create-new-note-top-btn"]');
+            await page.waitForSelector('#note-editor-container');
+            await page.fill('#note-title-input', title);
+            await page.fill('#note-content-textarea', content);
+            await page.click('#editor-back-btn');
+            await page.waitForSelector('#note-list-container');
+          }
+
+          await createNote('KEEP SAFE QA', 'このメモは削除されてはいけません。');
+          await createNote('SWIPE TRASH QA', '左スワイプでゴミ箱へ移動するテスト。');
+
+          const target = page.locator('[data-note-card="true"]', { hasText: 'SWIPE TRASH QA' });
+          const keep = page.locator('[data-note-card="true"]', { hasText: 'KEEP SAFE QA' });
+          fail(await target.count() !== 1, 'Swipe target note was not created exactly once');
+          fail(await keep.count() !== 1, 'Protected note was not created exactly once');
+
+          const fontMetrics = await page.evaluate(() => {
+            const target = Array.from(document.querySelectorAll('[data-note-card="true"]')).find((el) => el.textContent?.includes('SWIPE TRASH QA'));
+            const title = target?.querySelector('h2');
+            const snippet = target?.querySelector('p');
+            const create = document.querySelector('[data-testid="create-new-note-top-btn"]');
+            return {
+              root: parseFloat(getComputedStyle(document.documentElement).fontSize),
+              title: title ? parseFloat(getComputedStyle(title).fontSize) : 0,
+              snippet: snippet ? parseFloat(getComputedStyle(snippet).fontSize) : 0,
+              create: create ? parseFloat(getComputedStyle(create).fontSize) : 0,
+            };
+          });
+          fail(fontMetrics.root < 17, `Root font is only ${fontMetrics.root}px`);
+          fail(fontMetrics.title < 16, `Memo title is only ${fontMetrics.title}px`);
+          fail(fontMetrics.snippet < 14, `Memo snippet is only ${fontMetrics.snippet}px`);
+          fail(fontMetrics.create < 16, `New memo button text is only ${fontMetrics.create}px`);
+          await page.screenshot({ path: 'trash-qa-artifacts/home-larger-type.png', fullPage: true });
+
+          async function swipeLeft(locator, release = true) {
+            const box = await locator.boundingBox();
+            if (!box) throw new Error('Cannot swipe an invisible note card');
+            const y = box.y + Math.min(box.height / 2, 48);
+            const x1 = box.x + box.width - 18;
+            const x2 = x1 - 100;
+            await page.mouse.move(x1, y);
+            await page.mouse.down();
+            await page.mouse.move(x2, y, { steps: 8 });
+            if (release) await page.mouse.up();
+          }
+
+          await swipeLeft(target, false);
+          const revealTransform = await target.evaluate((el) => getComputedStyle(el).transform);
+          fail(revealTransform === 'none', 'Swipe gesture did not translate the note card');
+          await page.screenshot({ path: 'trash-qa-artifacts/swipe-trash-revealed.png', fullPage: true });
+          await page.mouse.up();
+          await page.waitForTimeout(250);
+
+          fail(await page.getByText('SWIPE TRASH QA', { exact: true }).count() !== 0, 'Swiped note is still visible in the active home list');
+          fail(await keep.count() !== 1, 'Another note was affected by the swipe deletion');
+          const trashButton = page.locator('#trash-header-btn');
+          fail(await trashButton.count() !== 1, 'Trash header button is missing');
+          await trashButton.click();
+          await page.waitForSelector('#trash-modal-content');
+          fail(await page.locator('[data-trash-note-id]').filter({ hasText: 'SWIPE TRASH QA' }).count() !== 1, 'Swiped note did not arrive in Trash');
+          fail(!(await page.getByText('1時間で自動的に完全削除', { exact: false }).count()), 'Trash does not explain the one-hour retention');
+          await page.screenshot({ path: 'trash-qa-artifacts/trash-before-restore.png', fullPage: true });
+
+          const trashEntry = page.locator('[data-trash-note-id]').filter({ hasText: 'SWIPE TRASH QA' });
+          await trashEntry.locator('[data-restore-note-id]').click();
+          await page.waitForTimeout(200);
+          fail(await page.locator('[data-trash-note-id]').filter({ hasText: 'SWIPE TRASH QA' }).count() !== 0, 'Restore did not remove the note from Trash');
+          await page.click('#close-trash-modal-btn');
+          await page.waitForSelector('#note-list-container');
+          const restored = page.locator('[data-note-card="true"]', { hasText: 'SWIPE TRASH QA' });
+          fail(await restored.count() !== 1, 'Restored note did not return to the home list');
+
+          await swipeLeft(restored, true);
+          await page.waitForTimeout(250);
+          await trashButton.click();
+          await page.waitForSelector('#trash-modal-content');
+          const secondTrashEntry = page.locator('[data-trash-note-id]').filter({ hasText: 'SWIPE TRASH QA' });
+          fail(await secondTrashEntry.count() !== 1, 'Note did not return to Trash after the second swipe');
+          const trashedId = await secondTrashEntry.getAttribute('data-trash-note-id');
+          fail(!trashedId, 'Trashed note id is missing');
+          await page.click('#close-trash-modal-btn');
+
+          if (trashedId) {
+            await page.evaluate(async ({ id }) => {
+              await new Promise((resolve, reject) => {
+                const request = indexedDB.open('ios_notes_db', 1);
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => {
+                  const db = request.result;
+                  const tx = db.transaction('notes', 'readwrite');
+                  const store = tx.objectStore('notes');
+                  const get = store.get(id);
+                  get.onerror = () => reject(get.error);
+                  get.onsuccess = () => {
+                    const note = get.result;
+                    if (!note) {
+                      reject(new Error('Trashed note missing from IndexedDB'));
+                      return;
+                    }
+                    note.trashedAt = Date.now() - 60 * 60 * 1000 - 5000;
+                    store.put(note);
+                  };
+                  tx.oncomplete = () => resolve(undefined);
+                  tx.onerror = () => reject(tx.error);
+                };
+              });
+            }, { id: trashedId });
+          }
+
+          await page.reload({ waitUntil: 'networkidle' });
+          await page.waitForSelector('#note-list-container');
+          await page.waitForTimeout(700);
+          fail(await page.getByText('SWIPE TRASH QA', { exact: true }).count() !== 0, 'Expired trash note returned to the active list');
+          fail(await page.locator('[data-note-card="true"]', { hasText: 'KEEP SAFE QA' }).count() !== 1, 'One-hour purge removed an unrelated active note');
+          await page.click('#trash-header-btn');
+          await page.waitForSelector('#trash-modal-content');
+          fail(await page.locator('[data-trash-note-id]').filter({ hasText: 'SWIPE TRASH QA' }).count() !== 0, 'Expired note was not permanently purged after one hour');
+
+          if (trashedId) {
+            const tombstonePresent = await page.evaluate((id) => {
+              try {
+                const raw = localStorage.getItem('memomemo_cloud_tombstones_v1');
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) && parsed.some((item) => item?.id === id);
+              } catch {
+                return false;
+              }
+            }, trashedId);
+            fail(!tombstonePresent, 'Permanent purge did not create a Cloudflare deletion tombstone');
+          }
+
+          const trashPolicySource = fs.readFileSync('src/services/trash.ts', 'utf8');
+          fail(!trashPolicySource.includes('60 * 60 * 1000'), 'Trash retention is not exactly one hour');
+          await page.screenshot({ path: 'trash-qa-artifacts/trash-after-auto-purge.png', fullPage: true });
+
+          fs.writeFileSync('trash-qa-artifacts/findings.json', JSON.stringify({ failures, fontMetrics }, null, 2));
+          console.log(JSON.stringify({ failures, fontMetrics }, null, 2));
+          await browser.close();
+          if (failures.length) process.exit(1);
+          EOF
+          node trash-swipe-font-regression.mjs
+
+      - name: Upload QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trash-swipe-font-regression
+          path: trash-qa-artifacts/

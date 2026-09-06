@@ -11,12 +11,14 @@ import {
 } from './services/storage';
 import { mergeNotesWithCloudState, syncWithCloudflare } from './services/cloudflareSync';
 import { recordNoteDeletion } from './services/cloudVault';
+import { TRASH_RETENTION_MS } from './services/trash';
 import { checkReminders } from './services/notifications';
 import { NoteList } from './components/NoteList';
 import { NoteEditor } from './components/NoteEditor';
 import { CloudflareModal } from './components/CloudflareModal';
 import { RemindersModal } from './components/RemindersModal';
 import { AttachmentViewer } from './components/AttachmentViewer';
+import { TrashModal } from './components/TrashModal';
 import { Smartphone, Monitor, Bell, X, CheckCircle2 } from 'lucide-react';
 
 const isPhoneLikeViewportNow = () => {
@@ -54,6 +56,7 @@ export default function App() {
   const cfConfigRef = useRef<CloudflareSyncConfig>(DEFAULT_CF_CONFIG);
   const [isCloudflareModalOpen, setIsCloudflareModalOpen] = useState<boolean>(false);
   const [isRemindersModalOpen, setIsRemindersModalOpen] = useState<boolean>(false);
+  const [isTrashModalOpen, setIsTrashModalOpen] = useState<boolean>(false);
   const [activeAttachment, setActiveAttachment] = useState<AttachmentItem | null>(null);
 
   // In-app alert banner
@@ -116,7 +119,7 @@ export default function App() {
     if (!isLoaded || notes.length === 0) return;
 
     const runCheck = () => {
-      checkReminders(notes, (title, body) => {
+      checkReminders(notes.filter((note) => !note.trashedAt), (title, body) => {
         setInAppAlert({ title, body });
       });
     };
@@ -311,25 +314,116 @@ export default function App() {
     scheduleAutoSync();
   };
 
-  // Delete Note. Record a versioned tombstone only after local deletion succeeds.
-  const handleDeleteNote = async (noteId: string) => {
+  // Normal delete is reversible: move the note to Trash first.
+  const handleDeleteNote = (noteId: string) => {
+    const noteToTrash = notesRef.current.find((note) => note.id === noteId);
+    if (!noteToTrash || noteToTrash.trashedAt) return;
+
+    const now = Date.now();
+    const trashedNote: Note = {
+      ...noteToTrash,
+      isPinned: false,
+      trashedAt: now,
+      updatedAt: now,
+      version: Math.max(1, (noteToTrash.version || 1) + 1),
+    };
+    const nextNotes = notesRef.current.map((note) =>
+      note.id === noteId ? trashedNote : note
+    );
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
+    if (selectedNoteId === noteId) setSelectedNoteId(null);
+    void saveNote(trashedNote).catch((err) => reportStorageError('ゴミ箱への移動', err));
+    scheduleAutoSync();
+  };
+
+  const handleRestoreNote = (noteId: string) => {
+    const trashedNote = notesRef.current.find((note) => note.id === noteId && note.trashedAt);
+    if (!trashedNote) return;
+    const now = Date.now();
+    const restoredNote: Note = {
+      ...trashedNote,
+      trashedAt: undefined,
+      updatedAt: now,
+      version: Math.max(1, (trashedNote.version || 1) + 1),
+    };
+    const nextNotes = notesRef.current.map((note) =>
+      note.id === noteId ? restoredNote : note
+    );
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
+    void saveNote(restoredNote).catch((err) => reportStorageError('メモ復元', err));
+    scheduleAutoSync();
+  };
+
+  // Permanent deletion is used only from Trash or after the one-hour retention window.
+  const handlePermanentDeleteNote = async (noteId: string) => {
     const noteToDelete = notesRef.current.find((note) => note.id === noteId);
     try {
       await deleteNoteStorage(noteId);
     } catch (err) {
-      reportStorageError('メモ削除', err);
-      return;
+      reportStorageError('メモ完全削除', err);
+      return false;
     }
 
     if (noteToDelete) recordNoteDeletion(noteToDelete);
-    const nextNotes = notesRef.current.filter((n) => n.id !== noteId);
+    const nextNotes = notesRef.current.filter((note) => note.id !== noteId);
     notesRef.current = nextNotes;
     setNotes(nextNotes);
-    if (selectedNoteId === noteId) {
-      setSelectedNoteId(null);
-    }
+    if (selectedNoteId === noteId) setSelectedNoteId(null);
     scheduleAutoSync();
+    return true;
   };
+
+  // Trash is self-cleaning. Schedule the next exact expiry instead of polling constantly.
+  useEffect(() => {
+    if (!isLoaded) return;
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const purgeAndSchedule = async () => {
+      if (cancelled) return;
+      const now = Date.now();
+      const expired = notesRef.current.filter(
+        (note) => typeof note.trashedAt === 'number' && now - note.trashedAt >= TRASH_RETENTION_MS
+      );
+
+      if (expired.length > 0) {
+        const removedIds = new Set<string>();
+        for (const note of expired) {
+          try {
+            await deleteNoteStorage(note.id);
+            recordNoteDeletion(note);
+            removedIds.add(note.id);
+          } catch (err) {
+            reportStorageError('ゴミ箱の自動削除', err);
+          }
+        }
+        if (removedIds.size > 0) {
+          const nextNotes = notesRef.current.filter((note) => !removedIds.has(note.id));
+          notesRef.current = nextNotes;
+          setNotes(nextNotes);
+          scheduleAutoSync();
+        }
+      }
+
+      const nextExpiry = notesRef.current
+        .filter((note) => typeof note.trashedAt === 'number')
+        .map((note) => (note.trashedAt as number) + TRASH_RETENTION_MS)
+        .sort((a, b) => a - b)[0];
+
+      if (nextExpiry) {
+        const delay = Math.max(500, nextExpiry - Date.now() + 100);
+        timer = window.setTimeout(() => void purgeAndSchedule(), delay);
+      }
+    };
+
+    void purgeAndSchedule();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [isLoaded, notes, reportStorageError, scheduleAutoSync]);
 
   // Quick Toggle task from Reminders Modal
   const handleToggleTask = (noteId: string, taskId: string) => {
@@ -361,25 +455,28 @@ export default function App() {
     handleUpdateNote(updatedNote);
   };
 
-  // All distinct tags across all notes
+  const activeNotes = useMemo(() => notes.filter((note) => !note.trashedAt), [notes]);
+  const trashNotes = useMemo(() => notes.filter((note) => !!note.trashedAt), [notes]);
+
+  // All distinct tags across active notes
   const allTags = useMemo(() => {
     const tagSet = new Set<string>();
-    notes.forEach((note) => {
+    activeNotes.forEach((note) => {
       note.tags.forEach((tag) => tagSet.add(tag));
     });
     return Array.from(tagSet).sort();
-  }, [notes]);
+  }, [activeNotes]);
 
-  // Total pending tasks count across all notes
+  // Total pending tasks count across active notes
   const totalPendingTasksCount = useMemo(() => {
-    return notes.reduce((acc, note) => {
+    return activeNotes.reduce((acc, note) => {
       return acc + note.tasks.filter((t) => !t.completed).length;
     }, 0);
-  }, [notes]);
+  }, [activeNotes]);
 
   const selectedNote = useMemo(() => {
-    return notes.find((n) => n.id === selectedNoteId) || null;
-  }, [notes, selectedNoteId]);
+    return activeNotes.find((n) => n.id === selectedNoteId) || null;
+  }, [activeNotes, selectedNoteId]);
 
   if (!isLoaded) {
     return (
@@ -509,10 +606,13 @@ export default function App() {
                 />
               ) : (
                 <NoteList
-                  notes={notes}
+                  notes={activeNotes}
                   selectedNoteId={selectedNoteId}
                   onSelectNote={(note) => setSelectedNoteId(note.id)}
                   onCreateNewNote={handleCreateNewNote}
+                  onMoveToTrash={handleDeleteNote}
+                  onOpenTrashModal={() => setIsTrashModalOpen(true)}
+                  trashCount={trashNotes.length}
                   filters={filters}
                   onUpdateFilters={setFilters}
                   allTags={allTags}
@@ -537,10 +637,13 @@ export default function App() {
                   }`}
                 >
                   <NoteList
-                    notes={notes}
+                    notes={activeNotes}
                     selectedNoteId={selectedNoteId}
                     onSelectNote={(note) => setSelectedNoteId(note.id)}
                     onCreateNewNote={handleCreateNewNote}
+                    onMoveToTrash={handleDeleteNote}
+                    onOpenTrashModal={() => setIsTrashModalOpen(true)}
+                    trashCount={trashNotes.length}
                     filters={filters}
                     onUpdateFilters={setFilters}
                     allTags={allTags}
@@ -622,11 +725,19 @@ export default function App() {
         }}
       />
 
+      <TrashModal
+        isOpen={isTrashModalOpen}
+        notes={trashNotes}
+        onClose={() => setIsTrashModalOpen(false)}
+        onRestore={handleRestoreNote}
+        onDeletePermanently={(noteId) => void handlePermanentDeleteNote(noteId)}
+      />
+
       {/* Reminders & Unfinished Tasks Modal */}
       <RemindersModal
         isOpen={isRemindersModalOpen}
         onClose={() => setIsRemindersModalOpen(false)}
-        notes={notes}
+        notes={activeNotes}
         onToggleTask={handleToggleTask}
         onSelectNote={(note) => {
           setSelectedNoteId(note.id);

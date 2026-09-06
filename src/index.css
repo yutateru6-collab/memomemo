@@ -29,6 +29,10 @@
     --ios-border: #2c2c2e;
   }
 
+  html {
+    font-size: 17px;
+  }
+
   html, body {
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
     -webkit-tap-highlight-color: transparent;
@@ -41,7 +45,7 @@
    Keep the existing desktop typography unchanged. */
 @media (max-width: 639px) {
   #note-content-textarea {
-    font-size: 16px;
+    font-size: 17px;
   }
 }
 
@@ -123,11 +127,11 @@
   input:not(#note-title-input),
   textarea,
   select {
-    font-size: 16px !important;
+    font-size: 17px !important;
   }
 
   #note-content-textarea {
-    font-size: 16px !important;
+    font-size: 17px !important;
   }
 
   .editor-scroll-content {
@@ -140,11 +144,11 @@
   input:not([type="checkbox"]):not([type="file"]):not([type="hidden"]),
   textarea,
   select {
-    font-size: 16px !important;
+    font-size: 17px !important;
   }
 
   #note-content-textarea {
-    font-size: 16px !important;
+    font-size: 17px !important;
   }
 
   .editor-scroll-content {
