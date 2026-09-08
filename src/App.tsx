@@ -13,6 +13,7 @@ import { mergeNotesWithCloudState, syncWithCloudflare } from './services/cloudfl
 import { recordNoteDeletion } from './services/cloudVault';
 import { TRASH_RETENTION_MS } from './services/trash';
 import { checkReminders } from './services/notifications';
+import { isSchoolSystemNote } from './services/schoolStorage';
 import { NoteList } from './components/NoteList';
 import { NoteEditor } from './components/NoteEditor';
 import { CloudflareModal } from './components/CloudflareModal';
@@ -455,8 +456,16 @@ export default function App() {
     handleUpdateNote(updatedNote);
   };
 
-  const activeNotes = useMemo(() => notes.filter((note) => !note.trashedAt), [notes]);
-  const trashNotes = useMemo(() => notes.filter((note) => !!note.trashedAt), [notes]);
+  // School lessons/settings are encrypted Note records internally so they can use the same cloud vault.
+  // Keep those implementation records completely out of the normal memo and trash UI.
+  const activeNotes = useMemo(
+    () => notes.filter((note) => !note.trashedAt && !isSchoolSystemNote(note)),
+    [notes]
+  );
+  const trashNotes = useMemo(
+    () => notes.filter((note) => !!note.trashedAt && !isSchoolSystemNote(note)),
+    [notes]
+  );
 
   // All distinct tags across active notes
   const allTags = useMemo(() => {
