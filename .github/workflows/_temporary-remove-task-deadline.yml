@@ -1,0 +1,374 @@
+name: Temporary Remove Task Deadline
+
+on:
+  push:
+    branches:
+      - fix/remove-task-deadline-20260908
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/remove-task-deadline-20260908
+          fetch-depth: 0
+
+      - name: Remove task deadline/calendar feature
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          # NoteEditor: task text/check/edit/delete only. No task due-date picker.
+          p = Path('src/components/NoteEditor.tsx')
+          s = p.read_text()
+          s = s.replace('  Calendar,\n', '', 1)
+          s = s.replace("  const [newTaskDueDate, setNewTaskDueDate] = useState('');\n", '', 1)
+          s = s.replace('      dueDate: newTaskDueDate || undefined,\n', '', 1)
+          s = s.replace("    setNewTaskDueDate('');\n", '', 1)
+          s = re.sub(
+              r"\n  // Update Task Due Date\n  const handleTaskDueDateChange = \(taskId: string, dueDate: string\) => \{.*?\n  \};\n",
+              '\n', s, count=1, flags=re.S,
+          )
+          s = s.replace("""            {note.tasks.map((task) => {
+              const isOverdue =
+                !task.completed &&
+                task.dueDate &&
+                new Date(task.dueDate).getTime() < Date.now();
+
+              return (
+""", """            {note.tasks.map((task) => {
+              return (
+""", 1)
+          s = s.replace("""                    task.completed
+                      ? 'bg-neutral-50/60 dark:bg-neutral-900/30'
+                      : isOverdue
+                      ? 'bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50'
+                      : 'bg-neutral-50 dark:bg-neutral-800/40 hover:bg-neutral-100 dark:hover:bg-neutral-800/80'
+""", """                    task.completed
+                      ? 'bg-neutral-50/60 dark:bg-neutral-900/30'
+                      : 'bg-neutral-50 dark:bg-neutral-800/40 hover:bg-neutral-100 dark:hover:bg-neutral-800/80'
+""", 1)
+          s = s.replace("""                    {/* Due Date Picker or Label */}
+                    <div className="relative flex items-center">
+                      <input
+                        type="datetime-local"
+                        value={task.dueDate || ''}
+                        onChange={(e) => handleTaskDueDateChange(task.id, e.target.value)}
+                        className="min-h-11 text-[11px] bg-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 outline-none w-28 cursor-pointer"
+                        title="タスクの期日を設定"
+                      />
+                    </div>
+
+""", '', 1)
+          s = re.sub(
+              r"          \{\/\* Add New Task Form:.*?\*\/\}\n          <form onSubmit=\{handleAddTask\}.*?</form>",
+              '''          {/* Add New Task Form */}
+          <form onSubmit={handleAddTask} className="flex items-center gap-2 pt-1">
+            <input
+              id="new-task-text-input"
+              type="text"
+              placeholder="新しいタスクを追加..."
+              value={newTaskText}
+              onChange={(e) => setNewTaskText(e.target.value)}
+              className="flex-1 min-w-0 min-h-11 text-base lg:text-xs px-3 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
+            />
+            <button
+              id="add-task-btn"
+              type="submit"
+              disabled={!newTaskText.trim()}
+              className="shrink-0 min-w-20 min-h-11 px-4 py-2 bg-amber-500 hover:bg-amber-400 active:bg-amber-300 disabled:opacity-40 text-black text-sm lg:text-xs font-semibold rounded-xl transition-colors"
+            >
+              追加
+            </button>
+          </form>''',
+              s, count=1, flags=re.S,
+          )
+          if 'newTaskDueDate' in s or 'handleTaskDueDateChange' in s or 'title="タスクの期日を設定"' in s:
+              raise SystemExit('NoteEditor task deadline controls remain')
+          p.write_text(s)
+
+          # App: remove RemindersModal task due-date update plumbing.
+          p = Path('src/App.tsx')
+          s = p.read_text()
+          s = re.sub(
+              r"\n  // Quick Update task due date from Reminders Modal\n  const handleUpdateTaskDueDate = .*?\n  \};\n",
+              '\n', s, count=1, flags=re.S,
+          )
+          s = s.replace('        onUpdateTaskDueDate={handleUpdateTaskDueDate}\n', '', 1)
+          if 'handleUpdateTaskDueDate' in s or 'onUpdateTaskDueDate=' in s:
+              raise SystemExit('App task due date plumbing remains')
+          p.write_text(s)
+
+          # CalendarView: tasks never become calendar events.
+          p = Path('src/components/CalendarView.tsx')
+          s = p.read_text()
+          s = s.replace('  CheckSquare,\n', '', 1)
+          s = s.replace("  | { id: string; date: string; type: 'memo'; title: string; detail: string; note: Note }\n  | { id: string; date: string; type: 'task'; title: string; detail: string; note: Note };",
+                        "  | { id: string; date: string; type: 'memo'; title: string; detail: string; note: Note };", 1)
+          s = re.sub(
+              r"\n      for \(const task of note\.tasks\) \{.*?\n      \}\n",
+              '\n', s, count=1, flags=re.S,
+          )
+          s = s.replace("""                          event.type === 'school'
+                            ? 'bg-amber-500/20 text-amber-800 dark:text-amber-200'
+                            : event.type === 'task'
+                            ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
+                            : 'bg-sky-500/15 text-sky-800 dark:text-sky-200'
+""", """                          event.type === 'school'
+                            ? 'bg-amber-500/20 text-amber-800 dark:text-amber-200'
+                            : 'bg-sky-500/15 text-sky-800 dark:text-sky-200'
+""", 1)
+          s = s.replace("className={`w-10 h-10 rounded-xl shrink-0 inline-flex items-center justify-center ${event.type === 'school' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300' : event.type === 'task' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300' : 'bg-sky-500/15 text-sky-600 dark:text-sky-300'}`}",
+                        "className={`w-10 h-10 rounded-xl shrink-0 inline-flex items-center justify-center ${event.type === 'school' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300' : 'bg-sky-500/15 text-sky-600 dark:text-sky-300'}`}", 1)
+          s = s.replace("{event.type === 'school' ? <BookOpen className=\"w-5 h-5\" /> : event.type === 'task' ? <CheckSquare className=\"w-5 h-5\" /> : <Clock className=\"w-5 h-5\" />}",
+                        "{event.type === 'school' ? <BookOpen className=\"w-5 h-5\" /> : <Clock className=\"w-5 h-5\" />}", 1)
+          if "type: 'task'" in s or 'task.dueDate' in s or '<CheckSquare' in s:
+              raise SystemExit('Calendar task event support remains')
+          p.write_text(s)
+
+          # Notifications: only note-level reminders; task deadlines no longer notify.
+          Path('src/services/notifications.ts').write_text('''import { Note } from '../types';
+
+// Track alerted note reminders to avoid spamming the user.
+const alertedItems = new Set<string>();
+
+/**
+ * 通知の許可リクエスト
+ */
+export async function requestNotificationPermission(): Promise<NotificationPermission> {
+  if (!(\'Notification\' in window)) {
+    return \'denied\';
+  }
+  if (Notification.permission === \'granted\') {
+    return \'granted\';
+  }
+  try {
+    return await Notification.requestPermission();
+  } catch {
+    return \'denied\';
+  }
+}
+
+/**
+ * メモ全体に設定した期限だけをリマインドする。
+ * ToDoタスクには期限・カレンダー・期限通知を持たせない。
+ */
+export function checkReminders(
+  notes: Note[],
+  onReminderTriggered?: (title: string, body: string) => void
+) {
+  const now = Date.now();
+
+  notes.forEach((note) => {
+    if (!note.reminderActive || !note.dueDate) return;
+
+    const dueTime = new Date(note.dueDate).getTime();
+    const noteAlertKey = `note-${note.id}-${note.dueDate}`;
+
+    if (
+      !alertedItems.has(noteAlertKey) &&
+      dueTime <= now + 15 * 60 * 1000 &&
+      dueTime >= now - 60 * 60 * 1000
+    ) {
+      alertedItems.add(noteAlertKey);
+      const title = `⏰ メモのリマインダー: ${note.title || '無題'}`;
+      const body = `期限: ${new Date(note.dueDate).toLocaleString('ja-JP')} のメモがあります。`;
+      sendNotification(title, body);
+      onReminderTriggered?.(title, body);
+    }
+  });
+}
+
+function sendNotification(title: string, body: string) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification(title, {
+        body,
+        icon: '/favicon.ico',
+      });
+    } catch {
+      // Ignore if background notification fails in iframe.
+    }
+  }
+}
+''')
+
+          # Reminders modal: incomplete-task list only. No task due-date controls/status.
+          Path('src/components/RemindersModal.tsx').write_text('''import React, { useState } from 'react';
+import { Note, TaskItem } from '../types';
+import { requestNotificationPermission } from '../services/notifications';
+import { X, Bell, CheckCircle2, Circle, ExternalLink, Clock } from 'lucide-react';
+
+interface RemindersModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  notes: Note[];
+  onToggleTask: (noteId: string, taskId: string) => void;
+  onSelectNote: (note: Note) => void;
+}
+
+interface PendingTaskWithNote {
+  task: TaskItem;
+  note: Note;
+}
+
+export const RemindersModal: React.FC<RemindersModalProps> = ({
+  isOpen,
+  onClose,
+  notes,
+  onToggleTask,
+  onSelectNote,
+}) => {
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
+  );
+
+  if (!isOpen) return null;
+
+  const pendingTasks: PendingTaskWithNote[] = [];
+  notes.forEach((note) => {
+    note.tasks.forEach((task) => {
+      if (!task.completed) pendingTasks.push({ task, note });
+    });
+  });
+
+  const handleRequestPermission = async () => {
+    const perm = await requestNotificationPermission();
+    setNotifPermission(perm);
+    if (perm === 'granted') {
+      new Notification('🔔 通知が有効になりました', {
+        body: 'アプリを開いている間、メモ全体に設定した期限をお知らせします。',
+      });
+    }
+  };
+
+  return (
+    <div
+      id="reminders-modal-backdrop"
+      className="modal-safe-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
+      onClick={onClose}
+    >
+      <div
+        id="reminders-modal-content"
+        className="w-full max-w-lg bg-white dark:bg-[#1c1c1e] text-neutral-900 dark:text-neutral-100 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden flex flex-col max-h-full"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-200 dark:border-neutral-800">
+          <div className="flex items-center gap-2">
+            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              <Bell className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold">未完了タスク</h2>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">やり残したタスクの一覧</p>
+            </div>
+          </div>
+          <button
+            id="close-reminders-modal-btn"
+            type="button"
+            onClick={onClose}
+            className="justify-center items-center inline-flex min-h-11 min-w-11 p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 bg-neutral-50 dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs">
+            <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+            <div>
+              <span className="font-medium">メモ期限の通知: </span>
+              {notifPermission === 'granted' ? (
+                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">許可済み</span>
+              ) : notifPermission === 'denied' ? (
+                <span className="text-rose-500 font-semibold">拒否されています</span>
+              ) : (
+                <span className="text-neutral-500">未設定</span>
+              )}
+            </div>
+          </div>
+
+          {notifPermission !== 'granted' && (
+            <button
+              type="button"
+              onClick={handleRequestPermission}
+              id="enable-notifications-btn"
+              className="min-h-11 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-sm font-semibold shrink-0 transition-colors shadow-xs"
+            >
+              通知を有効にする
+            </button>
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {pendingTasks.length === 0 ? (
+            <div className="text-center py-12 text-neutral-400">
+              <CheckCircle2 className="w-12 h-12 mx-auto mb-2 text-emerald-500/80" />
+              <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">すべてのタスクが完了しています！</p>
+              <p className="text-xs text-neutral-400 mt-1">メモにチェックリストを追加すると、ここに表示されます。</p>
+            </div>
+          ) : (
+            pendingTasks.map(({ task, note }) => (
+              <div
+                key={`${note.id}-${task.id}`}
+                className="p-3 rounded-xl border bg-white dark:bg-[#252528] border-neutral-200 dark:border-neutral-800"
+              >
+                <div className="flex items-start gap-2.5">
+                  <button
+                    type="button"
+                    data-testid="reminder-task-toggle-btn"
+                    onClick={() => onToggleTask(note.id, task.id)}
+                    className="min-w-11 min-h-11 inline-flex items-center justify-center text-neutral-400 hover:text-amber-500 shrink-0 transition-colors"
+                  >
+                    <Circle className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-neutral-900 dark:text-neutral-100 break-words">{task.text}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelectNote(note);
+                        onClose();
+                      }}
+                      className="mt-1.5 min-h-11 inline-flex items-center gap-1 text-[11px] text-neutral-500 hover:text-amber-500 transition-colors"
+                    >
+                      <span>📝 {note.title || '無題のメモ'}</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="p-3 bg-neutral-50 dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800 text-center text-xs text-neutral-500">
+          未完了タスク {pendingTasks.length} 件
+        </div>
+      </div>
+    </div>
+  );
+};
+''')
+          PY
+
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/NoteEditor.tsx src/App.tsx src/components/CalendarView.tsx src/components/RemindersModal.tsx src/services/notifications.ts
+          if git diff --cached --quiet; then
+            echo "No source changes"
+            exit 0
+          fi
+          git commit -m "fix: remove task deadline and calendar controls"
+          git push origin HEAD:fix/remove-task-deadline-20260908
