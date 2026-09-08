@@ -3,15 +3,18 @@ import { BookOpen, CalendarDays, NotebookPen } from 'lucide-react';
 import App from './App';
 import { SchoolMemoView } from './components/SchoolMemoView';
 import { CalendarView } from './components/CalendarView';
+import { SchoolClassId } from './schoolTypes';
 
 type AppSection = 'memo' | 'school' | 'calendar';
 
 export default function MemoMemoShell() {
   const [section, setSection] = useState<AppSection>('memo');
   const [schoolDate, setSchoolDate] = useState<string | undefined>(undefined);
+  const [schoolClassId, setSchoolClassId] = useState<SchoolClassId>('2-3');
 
-  const openSchool = (date?: string) => {
-    setSchoolDate(date);
+  const openSchool = (date?: string, classId?: SchoolClassId) => {
+    if (date) setSchoolDate(date);
+    if (classId) setSchoolClassId(classId);
     setSection('school');
   };
 
@@ -20,16 +23,19 @@ export default function MemoMemoShell() {
       {section === 'memo' && <App />}
       {section === 'school' && (
         <SchoolMemoView
-          key={schoolDate || 'school-default'}
+          key={`${schoolClassId}-${schoolDate || 'school-default'}`}
           initialDate={schoolDate}
-          onOpenCalendar={(date) => {
+          initialClassId={schoolClassId}
+          onOpenCalendar={(date, classId) => {
             if (date) setSchoolDate(date);
+            if (classId) setSchoolClassId(classId);
             setSection('calendar');
           }}
         />
       )}
       {section === 'calendar' && (
         <CalendarView
+          initialDate={schoolDate}
           onOpenSchool={openSchool}
           onOpenMemo={() => setSection('memo')}
         />
@@ -50,7 +56,7 @@ export default function MemoMemoShell() {
             active={section === 'school'}
             label="学校"
             icon={<BookOpen className="w-4 h-4" />}
-            onClick={() => openSchool(schoolDate)}
+            onClick={() => openSchool(schoolDate, schoolClassId)}
           />
           <NavButton
             active={section === 'calendar'}
