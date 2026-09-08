@@ -23,7 +23,8 @@ import {
 
 interface SchoolMemoViewProps {
   initialDate?: string;
-  onOpenCalendar: (date?: string) => void;
+  initialClassId?: SchoolClassId;
+  onOpenCalendar: (date?: string, classId?: SchoolClassId) => void;
 }
 
 type LessonDraft = Omit<SchoolLesson, 'id' | 'createdAt' | 'updatedAt'>;
@@ -37,9 +38,9 @@ const todayKey = () => {
 };
 
 const formatDate = (dateKey: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return '日付未設定';
   const [year, month, day] = dateKey.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
-  return date.toLocaleDateString('ja-JP', {
+  return new Date(year, month - 1, day).toLocaleDateString('ja-JP', {
     month: 'numeric',
     day: 'numeric',
     weekday: 'short',
@@ -61,12 +62,18 @@ const createDraft = (classId: SchoolClassId, date: string, examScope: string): L
 const fieldClass =
   'w-full min-h-24 rounded-2xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-[#1c1c1e] px-4 py-3 text-base text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-amber-500/70 resize-y';
 
-export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onOpenCalendar }) => {
+export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({
+  initialDate,
+  initialClassId = '2-3',
+  onOpenCalendar,
+}) => {
   const [lessons, setLessons] = useState<SchoolLesson[]>([]);
   const [settings, setSettings] = useState<SchoolClassSettings[]>([]);
-  const [selectedClass, setSelectedClass] = useState<SchoolClassId>('2-3');
+  const [selectedClass, setSelectedClass] = useState<SchoolClassId>(initialClassId);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<LessonDraft>(() => createDraft('2-3', initialDate || todayKey(), ''));
+  const [draft, setDraft] = useState<LessonDraft>(() =>
+    createDraft(initialClassId, initialDate || todayKey(), '')
+  );
   const [examScopeInput, setExamScopeInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -79,18 +86,20 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
         getSchoolClassSettings(),
       ]);
       if (cancelled) return;
+      const scope = loadedSettings.find((item) => item.classId === initialClassId)?.examScope || '';
       setLessons(loadedLessons);
       setSettings(loadedSettings);
-      const scope = loadedSettings.find((item) => item.classId === '2-3')?.examScope || '';
+      setSelectedClass(initialClassId);
       setExamScopeInput(scope);
-      setDraft(createDraft('2-3', initialDate || todayKey(), scope));
+      setDraft(createDraft(initialClassId, initialDate || todayKey(), scope));
+      setEditingId(null);
       setLoading(false);
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [initialDate]);
+  }, [initialDate, initialClassId]);
 
   const currentExamScope = useMemo(
     () => settings.find((item) => item.classId === selectedClass)?.examScope || '',
@@ -104,19 +113,26 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
 
   const nextScheduledLesson = useMemo(() => {
     const today = todayKey();
-    return [...classLessons]
-      .filter((item) => !item.completed && item.lessonDate >= today)
-      .sort((a, b) => a.lessonDate.localeCompare(b.lessonDate))[0] || null;
+    return (
+      [...classLessons]
+        .filter((item) => !item.completed && item.lessonDate >= today)
+        .sort((a, b) => a.lessonDate.localeCompare(b.lessonDate))[0] || null
+    );
   }, [classLessons]);
 
   const latestPreviousNext = useMemo(() => {
-    const beforeOrSame = classLessons
-      .filter((item) => item.id !== editingId && item.lessonDate <= draft.lessonDate && item.nextLesson.trim())
+    const previous = classLessons
+      .filter(
+        (item) =>
+          item.id !== editingId &&
+          item.lessonDate <= draft.lessonDate &&
+          item.nextLesson.trim().length > 0
+      )
       .sort((a, b) => {
         if (a.lessonDate !== b.lessonDate) return b.lessonDate.localeCompare(a.lessonDate);
         return b.updatedAt - a.updatedAt;
       });
-    return beforeOrSame[0]?.nextLesson || '';
+    return previous[0]?.nextLesson || '';
   }, [classLessons, draft.lessonDate, editingId]);
 
   const switchClass = (classId: SchoolClassId) => {
@@ -136,6 +152,7 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
   };
 
   const editLesson = (lesson: SchoolLesson) => {
+    setSelectedClass(lesson.classId);
     setEditingId(lesson.id);
     setDraft({
       classId: lesson.classId,
@@ -175,15 +192,17 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
     const existing = editingId ? lessons.find((item) => item.id === editingId) : undefined;
     const saved: SchoolLesson = {
       ...draft,
+      classId: selectedClass,
       id: existing?.id || `lesson-${now}-${Math.random().toString(36).slice(2, 7)}`,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     };
     await saveSchoolLesson(saved);
-    setLessons((current) => {
-      const next = [saved, ...current.filter((item) => item.id !== saved.id)];
-      return next.sort((a, b) => b.lessonDate.localeCompare(a.lessonDate) || b.updatedAt - a.updatedAt);
-    });
+    setLessons((current) =>
+      [saved, ...current.filter((item) => item.id !== saved.id)].sort(
+        (a, b) => b.lessonDate.localeCompare(a.lessonDate) || b.updatedAt - a.updatedAt
+      )
+    );
     setEditingId(saved.id);
     setSaveMessage('授業メモを保存しました');
   };
@@ -192,6 +211,9 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
     const updated = { ...lesson, completed: !lesson.completed, updatedAt: Date.now() };
     await saveSchoolLesson(updated);
     setLessons((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    if (editingId === updated.id) {
+      setDraft((current) => ({ ...current, completed: updated.completed }));
+    }
   };
 
   const removeLesson = async (lesson: SchoolLesson) => {
@@ -220,18 +242,21 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
             </div>
             <button
               type="button"
-              onClick={() => onOpenCalendar(draft.lessonDate)}
+              onClick={() => onOpenCalendar(draft.lessonDate, selectedClass)}
               className="min-h-11 px-3 rounded-xl bg-white dark:bg-[#1c1c1e] border border-neutral-200 dark:border-neutral-700 inline-flex items-center gap-2 text-sm font-semibold"
             >
               <CalendarDays className="w-4 h-4 text-amber-500" />
               カレンダー
             </button>
           </div>
-          <div className="grid grid-cols-3 gap-2">
+
+          <div className="grid grid-cols-3 gap-2" data-testid="school-class-tabs">
             {SCHOOL_CLASSES.map((classId) => (
               <button
                 key={classId}
                 type="button"
+                data-school-class={classId}
+                aria-pressed={selectedClass === classId}
                 onClick={() => switchClass(classId)}
                 className={`min-h-11 rounded-xl font-bold transition-colors ${
                   selectedClass === classId
@@ -272,9 +297,10 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
           <div className="p-4 border-b border-neutral-200 dark:border-neutral-800">
             <div className="flex items-center gap-2 mb-2">
               <GraduationCap className="w-5 h-5 text-amber-500" />
-              <h2 className="font-bold">{selectedClass}　現在の試験範囲</h2>
+              <h2 className="font-bold" data-testid="current-exam-scope-title">{selectedClass}　現在の試験範囲</h2>
             </div>
             <textarea
+              data-testid="school-exam-scope"
               value={examScopeInput}
               onChange={(e) => setExamScopeInput(e.target.value)}
               placeholder="例：Vision Quest 名詞・冠詞〜時制② / Workbook p.30〜45"
@@ -308,6 +334,7 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
             <label className="block">
               <span className="text-sm font-bold">授業日</span>
               <input
+                data-testid="school-lesson-date"
                 type="date"
                 value={draft.lessonDate}
                 onChange={(e) => setDraft((current) => ({ ...current, lessonDate: e.target.value }))}
@@ -329,48 +356,12 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
               </button>
             )}
 
-            <Field
-              icon={<BookOpen className="w-4 h-4" />}
-              label="何の授業をするか"
-              value={draft.lessonContent}
-              onChange={(value) => setDraft((current) => ({ ...current, lessonContent: value }))}
-              placeholder="例：時制② 現在完了・過去完了"
-            />
-            <Field
-              icon={<ListChecks className="w-4 h-4" />}
-              label="どう進めるか"
-              value={draft.lessonFlow}
-              onChange={(value) => setDraft((current) => ({ ...current, lessonFlow: value }))}
-              placeholder={'例：前回復習 → 解説 → 例題 → 演習\n板書するポイントもここに追記できます'}
-            />
-            <Field
-              icon={<FileText className="w-4 h-4" />}
-              label="何を配布するか"
-              value={draft.handouts}
-              onChange={(value) => setDraft((current) => ({ ...current, handouts: value }))}
-              placeholder="例：時制②プリント、解答冊子"
-            />
-            <Field
-              icon={<ClipboardList className="w-4 h-4" />}
-              label="最初の小テスト"
-              value={draft.openingQuiz}
-              onChange={(value) => setDraft((current) => ({ ...current, openingQuiz: value }))}
-              placeholder="例：単語730〜750 / 5分"
-            />
-            <Field
-              icon={<ChevronDown className="w-4 h-4" />}
-              label="次回何をするか"
-              value={draft.nextLesson}
-              onChange={(value) => setDraft((current) => ({ ...current, nextLesson: value }))}
-              placeholder="例：Workbook Exercise 3から"
-            />
-            <Field
-              icon={<GraduationCap className="w-4 h-4" />}
-              label="この授業時点の試験範囲"
-              value={draft.examScopeSnapshot}
-              onChange={(value) => setDraft((current) => ({ ...current, examScopeSnapshot: value }))}
-              placeholder="上の現在の試験範囲が新規授業に自動で入ります"
-            />
+            <Field testId="school-lesson-content" icon={<BookOpen className="w-4 h-4" />} label="何の授業をするか" value={draft.lessonContent} onChange={(value) => setDraft((current) => ({ ...current, lessonContent: value }))} placeholder="例：時制② 現在完了・過去完了" />
+            <Field testId="school-lesson-flow" icon={<ListChecks className="w-4 h-4" />} label="どう進めるか" value={draft.lessonFlow} onChange={(value) => setDraft((current) => ({ ...current, lessonFlow: value }))} placeholder={'例：前回復習 → 解説 → 例題 → 演習\n板書するポイントもここに追記できます'} />
+            <Field testId="school-handouts" icon={<FileText className="w-4 h-4" />} label="何を配布するか" value={draft.handouts} onChange={(value) => setDraft((current) => ({ ...current, handouts: value }))} placeholder="例：時制②プリント、解答冊子" />
+            <Field testId="school-opening-quiz" icon={<ClipboardList className="w-4 h-4" />} label="最初の小テスト" value={draft.openingQuiz} onChange={(value) => setDraft((current) => ({ ...current, openingQuiz: value }))} placeholder="例：単語730〜750 / 5分" />
+            <Field testId="school-next-lesson" icon={<ChevronDown className="w-4 h-4" />} label="次回何をするか" value={draft.nextLesson} onChange={(value) => setDraft((current) => ({ ...current, nextLesson: value }))} placeholder="例：Workbook Exercise 3から" />
+            <Field testId="school-exam-snapshot" icon={<GraduationCap className="w-4 h-4" />} label="この授業時点の試験範囲" value={draft.examScopeSnapshot} onChange={(value) => setDraft((current) => ({ ...current, examScopeSnapshot: value }))} placeholder="上の現在の試験範囲が新規授業に自動で入ります" />
 
             <label className="flex items-center gap-3 min-h-11 rounded-xl bg-neutral-100 dark:bg-neutral-900 px-3 cursor-pointer">
               <input
@@ -384,6 +375,7 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
 
             <div className="flex flex-wrap items-center gap-2">
               <button
+                data-testid="save-school-lesson"
                 type="button"
                 onClick={() => void saveLesson()}
                 className="min-h-12 px-5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold inline-flex items-center gap-2"
@@ -405,7 +397,7 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
                 </button>
               )}
             </div>
-            {saveMessage && <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">{saveMessage}</p>}
+            {saveMessage && <p data-testid="school-save-message" className="text-sm font-semibold text-amber-700 dark:text-amber-300">{saveMessage}</p>}
           </div>
         </section>
 
@@ -416,44 +408,22 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
           </div>
 
           {classLessons.length === 0 ? (
-            <div className="rounded-2xl bg-white dark:bg-[#1c1c1e] border border-neutral-200 dark:border-neutral-800 p-6 text-center text-neutral-500">
-              まだ授業メモはありません。
-            </div>
+            <div className="rounded-2xl bg-white dark:bg-[#1c1c1e] border border-neutral-200 dark:border-neutral-800 p-6 text-center text-neutral-500">まだ授業メモはありません。</div>
           ) : (
             classLessons.map((lesson) => (
-              <article
-                key={lesson.id}
-                className="rounded-2xl bg-white dark:bg-[#1c1c1e] border border-neutral-200 dark:border-neutral-800 p-4"
-              >
+              <article key={lesson.id} data-school-lesson-id={lesson.id} className="rounded-2xl bg-white dark:bg-[#1c1c1e] border border-neutral-200 dark:border-neutral-800 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <button type="button" onClick={() => editLesson(lesson)} className="flex-1 text-left min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold">{formatDate(lesson.lessonDate)}</span>
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                          lesson.completed
-                            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-                            : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
-                        }`}
-                      >
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${lesson.completed ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'}`}>
                         {lesson.completed ? '授業済み' : '予定'}
                       </span>
                     </div>
-                    <p className="mt-1 text-sm whitespace-pre-wrap break-words text-neutral-700 dark:text-neutral-200">
-                      {lesson.lessonContent || '授業内容未入力'}
-                    </p>
-                    {lesson.nextLesson && (
-                      <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400 whitespace-pre-wrap">
-                        次回：{lesson.nextLesson}
-                      </p>
-                    )}
+                    <p className="mt-1 text-sm whitespace-pre-wrap break-words text-neutral-700 dark:text-neutral-200">{lesson.lessonContent || '授業内容未入力'}</p>
+                    {lesson.nextLesson && <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400 whitespace-pre-wrap">次回：{lesson.nextLesson}</p>}
                   </button>
-                  <button
-                    type="button"
-                    aria-label="授業メモを削除"
-                    onClick={() => void removeLesson(lesson)}
-                    className="min-w-11 min-h-11 rounded-xl inline-flex items-center justify-center text-rose-500 hover:bg-rose-500/10"
-                  >
+                  <button type="button" aria-label="授業メモを削除" onClick={() => void removeLesson(lesson)} className="min-w-11 min-h-11 rounded-xl inline-flex items-center justify-center text-rose-500 hover:bg-rose-500/10">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -467,6 +437,7 @@ export const SchoolMemoView: React.FC<SchoolMemoViewProps> = ({ initialDate, onO
 };
 
 interface FieldProps {
+  testId: string;
   icon: React.ReactNode;
   label: string;
   value: string;
@@ -474,17 +445,12 @@ interface FieldProps {
   placeholder: string;
 }
 
-const Field: React.FC<FieldProps> = ({ icon, label, value, onChange, placeholder }) => (
+const Field: React.FC<FieldProps> = ({ testId, icon, label, value, onChange, placeholder }) => (
   <label className="block">
     <span className="flex items-center gap-2 text-sm font-bold mb-1.5 text-neutral-800 dark:text-neutral-200">
       <span className="text-amber-500">{icon}</span>
       {label}
     </span>
-    <textarea
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className={fieldClass}
-    />
+    <textarea data-testid={testId} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={fieldClass} />
   </label>
 );
