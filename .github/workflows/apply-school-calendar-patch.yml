@@ -1,0 +1,53 @@
+name: Apply School Calendar Patch
+
+on:
+  push:
+    branches:
+      - fix/memomemo-school-calendar
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/memomemo-school-calendar
+          fetch-depth: 0
+
+      - name: Patch NoteList to hide school storage records
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/components/NoteList.tsx')
+          text = path.read_text()
+
+          old = "  const filteredNotes = notes.filter((note) => {\n    // 1. Search Query"
+          new = "  // School lesson records share the encrypted Note storage/sync format, but stay out of the normal memo list.\n  const visibleNotes = notes.filter((note) => !note.id.startsWith('school-lesson-'));\n\n  const filteredNotes = visibleNotes.filter((note) => {\n    // 1. Search Query"
+          if old not in text and "const visibleNotes = notes.filter" not in text:
+              raise SystemExit('Could not locate filteredNotes anchor')
+          if old in text:
+              text = text.replace(old, new, 1)
+
+          text = text.replace('すべて ({notes.length})', 'すべて ({visibleNotes.length})')
+          text = text.replace('{notes.length} 件のメモ', '{visibleNotes.length} 件のメモ')
+          path.write_text(text)
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No patch changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/NoteList.tsx
+          git commit -m "fix: keep school records out of memo list"
+          git push origin HEAD:fix/memomemo-school-calendar
