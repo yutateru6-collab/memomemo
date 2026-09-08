@@ -440,20 +440,6 @@ export default function App() {
     handleUpdateNote(updatedNote);
   };
 
-  // Quick Update task due date from Reminders Modal
-  const handleUpdateTaskDueDate = (noteId: string, taskId: string, dueDate: string) => {
-    const targetNote = notesRef.current.find((n) => n.id === noteId);
-    if (!targetNote) return;
-
-    const updatedNote: Note = {
-      ...targetNote,
-      tasks: targetNote.tasks.map((t) =>
-        t.id === taskId ? { ...t, dueDate: dueDate || undefined } : t
-      ),
-      updatedAt: Date.now(),
-    };
-    handleUpdateNote(updatedNote);
-  };
 
   const activeNotes = useMemo(() => notes.filter((note) => !note.trashedAt), [notes]);
   const trashNotes = useMemo(() => notes.filter((note) => !!note.trashedAt), [notes]);
@@ -742,7 +728,6 @@ export default function App() {
         onSelectNote={(note) => {
           setSelectedNoteId(note.id);
         }}
-        onUpdateTaskDueDate={handleUpdateTaskDueDate}
       />
 
       {/* Attachment Viewer Lightbox */}
