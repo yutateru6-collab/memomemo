@@ -1,0 +1,59 @@
+name: Temporary School System Note UI Patch
+
+on:
+  push:
+    branches:
+      - fix/memomemo-school-cloud-sync-final-20260908
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/memomemo-school-cloud-sync-final-20260908
+          fetch-depth: 0
+
+      - name: Hide internal school sync records from the memo list
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/components/NoteList.tsx')
+          text = path.read_text()
+
+          anchor = "import { Note, FilterState, CloudflareSyncConfig, ThemeMode } from '../types';\n"
+          imp = "import { isSchoolSystemNote } from '../services/schoolStorage';\n"
+          if imp not in text:
+              if anchor not in text:
+                  raise SystemExit('NoteList import anchor not found')
+              text = text.replace(anchor, anchor + imp, 1)
+
+          old = "  // Filter logic\n  const filteredNotes = notes.filter((note) => {"
+          new = "  // Internal school sync records are valid Notes for encrypted backup, but are never user memos.\n  const visibleNotes = notes.filter((note) => !isSchoolSystemNote(note));\n\n  // Filter logic\n  const filteredNotes = visibleNotes.filter((note) => {"
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif 'const visibleNotes = notes.filter' not in text:
+              raise SystemExit('NoteList filter anchor not found')
+
+          text = text.replace('すべて ({notes.length})', 'すべて ({visibleNotes.length})')
+          path.write_text(text)
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/NoteList.tsx
+          git commit -m "fix: hide school sync records from memo list"
+          git push origin HEAD:fix/memomemo-school-cloud-sync-final-20260908
