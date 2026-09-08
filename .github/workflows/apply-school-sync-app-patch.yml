@@ -1,0 +1,58 @@
+name: Apply School Sync App Patch
+
+on:
+  push:
+    branches:
+      - fix/memomemo-school-sync-qa
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/memomemo-school-sync-qa
+          fetch-depth: 0
+
+      - name: Keep school system records out of normal memo UI
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/App.tsx')
+          text = path.read_text()
+
+          import_anchor = "import { checkReminders } from './services/notifications';\n"
+          import_line = "import { isSchoolSystemNote } from './services/schoolStorage';\n"
+          if import_line not in text:
+              if import_anchor not in text:
+                  raise SystemExit('Could not find App import anchor')
+              text = text.replace(import_anchor, import_anchor + import_line, 1)
+
+          old = "  const activeNotes = useMemo(() => notes.filter((note) => !note.trashedAt), [notes]);\n  const trashNotes = useMemo(() => notes.filter((note) => !!note.trashedAt), [notes]);"
+          new = "  // School lessons/settings are encrypted Note records internally so they can use the same cloud vault.\n  // Keep those implementation records completely out of the normal memo and trash UI.\n  const activeNotes = useMemo(\n    () => notes.filter((note) => !note.trashedAt && !isSchoolSystemNote(note)),\n    [notes]\n  );\n  const trashNotes = useMemo(\n    () => notes.filter((note) => !!note.trashedAt && !isSchoolSystemNote(note)),\n    [notes]\n  );"
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif '!isSchoolSystemNote(note)' not in text:
+              raise SystemExit('Could not find active/trash notes anchor')
+
+          path.write_text(text)
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No patch changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.tsx
+          git commit -m "fix: hide school sync records from memo UI"
+          git push origin HEAD:fix/memomemo-school-sync-qa
