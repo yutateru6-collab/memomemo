@@ -126,7 +126,10 @@ export const NoteList: React.FC<NoteListProps> = ({
   };
 
   // Filter logic
-  const filteredNotes = notes.filter((note) => {
+  // School lesson records share the encrypted Note storage/sync format, but stay out of the normal memo list.
+  const visibleNotes = notes.filter((note) => !note.id.startsWith('school-lesson-'));
+
+  const filteredNotes = visibleNotes.filter((note) => {
     // 1. Search Query
     if (filters.searchQuery) {
       const q = filters.searchQuery.toLowerCase();
@@ -316,7 +319,7 @@ export const NoteList: React.FC<NoteListProps> = ({
                 : 'bg-white dark:bg-[#1c1c1e] text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
             }`}
           >
-            すべて ({notes.length})
+            すべて ({visibleNotes.length})
           </button>
 
           {/* Pending Tasks Filter */}
@@ -381,7 +384,7 @@ export const NoteList: React.FC<NoteListProps> = ({
           ))}
         </div>
         <div className="pb-1 text-sm font-medium text-neutral-500 dark:text-neutral-400">
-          {notes.length} 件のメモ
+          {visibleNotes.length} 件のメモ
         </div>
       </div>
 
