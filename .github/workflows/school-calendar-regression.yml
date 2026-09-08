@@ -144,12 +144,12 @@ jobs:
           // Normal memo regression: save once, reopen later, append text, save again,
           // reload the whole app, and prove both the original and appended text remain.
           await mainNav.getByRole('button', { name: 'メモ', exact: true }).click();
-          await page.getByRole('heading', { name: 'メモ' }).waitFor();
+          await page.getByRole('heading', { name: 'メモ', exact: true }).waitFor();
           await page.locator('[data-testid="create-new-note-top-btn"]').click();
           await page.locator('#note-title-input').fill('QA 追記メモ');
           await page.locator('#note-content-textarea').fill('最初に保存した文');
           await page.locator('#editor-back-btn').click();
-          await page.getByRole('heading', { name: 'メモ' }).waitFor();
+          await page.getByRole('heading', { name: 'メモ', exact: true }).waitFor();
 
           const memoCard = page.locator('[data-note-card="true"]').filter({ hasText: 'QA 追記メモ' });
           fail(await memoCard.count() !== 1, 'Saved normal memo did not appear exactly once');
@@ -158,9 +158,9 @@ jobs:
           fail((await memoBody.inputValue()) !== '最初に保存した文', 'Saved normal memo did not reopen with its original body');
           await memoBody.fill('最初に保存した文\n後から追加した文');
           await page.locator('#editor-back-btn').click();
-          await page.getByRole('heading', { name: 'メモ' }).waitFor();
+          await page.getByRole('heading', { name: 'メモ', exact: true }).waitFor();
           await page.reload({ waitUntil: 'networkidle' });
-          await page.getByRole('heading', { name: 'メモ' }).waitFor();
+          await page.getByRole('heading', { name: 'メモ', exact: true }).waitFor();
 
           const persistedMemoCard = page.locator('[data-note-card="true"]').filter({ hasText: 'QA 追記メモ' });
           fail(await persistedMemoCard.count() !== 1, 'Appended memo did not persist after full reload');
