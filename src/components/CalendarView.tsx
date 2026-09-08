@@ -1,12 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BookOpen, CalendarDays, CheckSquare, ChevronLeft, ChevronRight, Clock, NotebookPen } from 'lucide-react';
+import {
+  BookOpen,
+  CalendarDays,
+  CheckSquare,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  NotebookPen,
+} from 'lucide-react';
 import { Note } from '../types';
 import { getAllNotes } from '../services/storage';
 import { getSchoolLessons } from '../services/schoolStorage';
-import { SchoolLesson } from '../schoolTypes';
+import { SchoolClassId, SchoolLesson } from '../schoolTypes';
 
 interface CalendarViewProps {
-  onOpenSchool: (date?: string) => void;
+  initialDate?: string;
+  onOpenSchool: (date?: string, classId?: SchoolClassId) => void;
   onOpenMemo: () => void;
 }
 
@@ -22,6 +31,12 @@ const dateKey = (date: Date) => {
   return `${y}-${m}-${d}`;
 };
 
+const dateFromKey = (value?: string) => {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date();
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+};
+
 const dueDateKey = (value?: string) => {
   if (!value) return null;
   const direct = value.match(/^(\d{4}-\d{2}-\d{2})/);
@@ -31,8 +46,8 @@ const dueDateKey = (value?: string) => {
 };
 
 const formatSelectedDate = (value: string) => {
-  const [year, month, day] = value.split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString('ja-JP', {
+  const date = dateFromKey(value);
+  return date.toLocaleDateString('ja-JP', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -40,10 +55,15 @@ const formatSelectedDate = (value: string) => {
   });
 };
 
-export const CalendarView: React.FC<CalendarViewProps> = ({ onOpenSchool, onOpenMemo }) => {
+export const CalendarView: React.FC<CalendarViewProps> = ({
+  initialDate,
+  onOpenSchool,
+  onOpenMemo,
+}) => {
+  const initial = dateFromKey(initialDate);
   const now = new Date();
-  const [monthCursor, setMonthCursor] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
-  const [selectedDate, setSelectedDate] = useState(() => dateKey(now));
+  const [monthCursor, setMonthCursor] = useState(() => new Date(initial.getFullYear(), initial.getMonth(), 1));
+  const [selectedDate, setSelectedDate] = useState(() => dateKey(initial));
   const [notes, setNotes] = useState<Note[]>([]);
   const [lessons, setLessons] = useState<SchoolLesson[]>([]);
   const [loading, setLoading] = useState(true);
@@ -200,6 +220,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onOpenSchool, onOpen
                 <button
                   key={key}
                   type="button"
+                  data-calendar-date={key}
                   onClick={() => setSelectedDate(key)}
                   className={`min-h-16 sm:min-h-20 rounded-xl p-1.5 text-left border transition-colors ${
                     selected
@@ -207,11 +228,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onOpenSchool, onOpen
                       : 'border-transparent hover:bg-neutral-100 dark:hover:bg-neutral-800'
                   } ${inMonth ? '' : 'opacity-35'}`}
                 >
-                  <span
-                    className={`w-7 h-7 inline-flex items-center justify-center rounded-full text-sm font-semibold ${
-                      isToday ? 'bg-amber-500 text-black' : ''
-                    }`}
-                  >
+                  <span className={`w-7 h-7 inline-flex items-center justify-center rounded-full text-sm font-semibold ${isToday ? 'bg-amber-500 text-black' : ''}`}>
                     {date.getDate()}
                   </span>
                   <div className="mt-1 space-y-0.5">
@@ -229,9 +246,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onOpenSchool, onOpen
                         {event.title}
                       </div>
                     ))}
-                    {dayEvents.length > 2 && (
-                      <div className="text-[9px] text-neutral-500 pl-1">+{dayEvents.length - 2}</div>
-                    )}
+                    {dayEvents.length > 2 && <div className="text-[9px] text-neutral-500 pl-1">+{dayEvents.length - 2}</div>}
                   </div>
                 </button>
               );
@@ -239,7 +254,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onOpenSchool, onOpen
           </div>
         </section>
 
-        <section className="space-y-2">
+        <section className="space-y-2" data-testid="calendar-day-events">
           <div className="flex items-center justify-between gap-3 px-1">
             <div>
               <p className="text-xs text-neutral-500">選択中</p>
@@ -259,34 +274,19 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onOpenSchool, onOpen
             selectedEvents.map((event) => (
               <article
                 key={event.id}
+                data-calendar-event={event.id}
                 className="rounded-2xl bg-white dark:bg-[#1c1c1e] border border-neutral-200 dark:border-neutral-800 p-4"
               >
                 <div className="flex items-start gap-3">
-                  <div
-                    className={`w-10 h-10 rounded-xl shrink-0 inline-flex items-center justify-center ${
-                      event.type === 'school'
-                        ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300'
-                        : event.type === 'task'
-                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
-                        : 'bg-sky-500/15 text-sky-600 dark:text-sky-300'
-                    }`}
-                  >
-                    {event.type === 'school' ? (
-                      <BookOpen className="w-5 h-5" />
-                    ) : event.type === 'task' ? (
-                      <CheckSquare className="w-5 h-5" />
-                    ) : (
-                      <Clock className="w-5 h-5" />
-                    )}
+                  <div className={`w-10 h-10 rounded-xl shrink-0 inline-flex items-center justify-center ${event.type === 'school' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300' : event.type === 'task' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300' : 'bg-sky-500/15 text-sky-600 dark:text-sky-300'}`}>
+                    {event.type === 'school' ? <BookOpen className="w-5 h-5" /> : event.type === 'task' ? <CheckSquare className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-bold break-words">{event.title}</p>
-                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1 whitespace-pre-wrap break-words">
-                      {event.detail}
-                    </p>
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1 whitespace-pre-wrap break-words">{event.detail}</p>
                     <button
                       type="button"
-                      onClick={() => (event.type === 'school' ? onOpenSchool(event.date) : onOpenMemo())}
+                      onClick={() => event.type === 'school' ? onOpenSchool(event.date, event.lesson.classId) : onOpenMemo()}
                       className="mt-3 min-h-11 px-3 rounded-xl border border-neutral-200 dark:border-neutral-700 text-sm font-semibold inline-flex items-center gap-2"
                     >
                       {event.type === 'school' ? <BookOpen className="w-4 h-4" /> : <NotebookPen className="w-4 h-4" />}
