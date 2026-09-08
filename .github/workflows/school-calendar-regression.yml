@@ -41,7 +41,7 @@ jobs:
           cat /tmp/memomemo-school-calendar-qa.log
           exit 1
 
-      - name: Verify school lesson persistence and calendar integration
+      - name: Verify school, calendar, and memo append persistence
         run: |
           mkdir -p school-calendar-qa-artifacts
           cat > school-calendar-regression.mjs <<'EOF'
@@ -114,8 +114,39 @@ jobs:
           fail(await page.locator('[data-school-lesson-id]').filter({ hasText: 'QA 時制② 現在完了' }).count() !== 1, '2-9 lesson did not persist after reload');
           await page.screenshot({ path: 'school-calendar-qa-artifacts/school-persisted-after-reload.png', fullPage: true });
 
-          fs.writeFileSync('school-calendar-qa-artifacts/findings.json', JSON.stringify({ failures, lessonDate }, null, 2));
-          console.log(JSON.stringify({ failures, lessonDate }, null, 2));
+          // Normal memo regression: school sync records must stay hidden, and a saved memo
+          // must remain editable so text can be appended later without replacing the old body.
+          await page.locator('nav[aria-label="メインナビゲーション"]').getByRole('button', { name: 'メモ', exact: true }).click();
+          await page.getByRole('heading', { name: 'メモ' }).waitFor();
+          fail(await page.locator('[data-note-card="true"]').filter({ hasText: '学校メモ 2-9' }).count() !== 0, 'Internal school sync record leaked into normal memo list');
+
+          await page.locator('[data-testid="create-new-note-top-btn"]').click();
+          await page.locator('#note-title-input').fill('QA 追記メモ');
+          await page.locator('#note-content-textarea').fill('最初に保存した文');
+          await page.locator('#editor-save-btn').click();
+          await page.locator('#editor-back-btn').click();
+          await page.getByRole('heading', { name: 'メモ' }).waitFor();
+
+          const memoCard = page.locator('[data-note-card="true"]').filter({ hasText: 'QA 追記メモ' });
+          fail(await memoCard.count() !== 1, 'Saved normal memo did not appear exactly once');
+          await memoCard.click();
+          const memoBody = page.locator('#note-content-textarea');
+          fail((await memoBody.inputValue()) !== '最初に保存した文', 'Normal memo body changed before append edit');
+          await memoBody.fill('最初に保存した文\n後から追加した文');
+          await page.locator('#editor-save-btn').click();
+          await page.locator('#editor-back-btn').click();
+          await page.reload({ waitUntil: 'networkidle' });
+          await page.getByRole('heading', { name: 'メモ' }).waitFor();
+
+          const persistedMemoCard = page.locator('[data-note-card="true"]').filter({ hasText: 'QA 追記メモ' });
+          fail(await persistedMemoCard.count() !== 1, 'Appended memo did not persist after reload');
+          await persistedMemoCard.click();
+          const persistedBody = await page.locator('#note-content-textarea').inputValue();
+          fail(!persistedBody.includes('最初に保存した文') || !persistedBody.includes('後から追加した文'), 'Later memo append did not preserve both old and new text');
+          await page.screenshot({ path: 'school-calendar-qa-artifacts/memo-append-persisted.png', fullPage: true });
+
+          fs.writeFileSync('school-calendar-qa-artifacts/findings.json', JSON.stringify({ failures, lessonDate, persistedBody }, null, 2));
+          console.log(JSON.stringify({ failures, lessonDate, persistedBody }, null, 2));
           await browser.close();
           if (failures.length) process.exit(1);
           EOF
