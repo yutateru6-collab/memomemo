@@ -1,0 +1,22 @@
+.app-shell {
+  position: relative;
+}
+
+.app-shell-notes #note-list-container {
+  padding-bottom: calc(76px + env(safe-area-inset-bottom));
+}
+
+.app-shell-notes:has(#note-editor-container) .app-shell-tabbar {
+  display: none;
+}
+
+.app-shell-school,
+.app-shell-calendar {
+  overscroll-behavior: none;
+}
+
+@supports not selector(:has(*)) {
+  .app-shell-notes #note-editor-container {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+}
