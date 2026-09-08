@@ -385,7 +385,7 @@ export const NoteList: React.FC<NoteListProps> = ({
           ))}
         </div>
         <div className="pb-1 text-sm font-medium text-neutral-500 dark:text-neutral-400">
-          {notes.length} 件のメモ
+          {visibleNotes.length} 件のメモ
         </div>
       </div>
 
