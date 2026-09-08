@@ -37,7 +37,7 @@ export default function MemoMemoShell() {
 
       <nav
         aria-label="メインナビゲーション"
-        className="fixed z-[100] left-1/2 -translate-x-1/2 bottom-[max(10px,env(safe-area-inset-bottom))] w-[min(92vw,390px)] rounded-2xl border border-neutral-300/80 dark:border-neutral-700/80 bg-white/95 dark:bg-[#1c1c1e]/95 shadow-2xl backdrop-blur-xl p-1.5"
+        className="fixed z-[40] left-1/2 -translate-x-1/2 bottom-[max(10px,env(safe-area-inset-bottom))] w-[min(92vw,390px)] rounded-2xl border border-neutral-300/80 dark:border-neutral-700/80 bg-white/95 dark:bg-[#1c1c1e]/95 shadow-2xl backdrop-blur-xl p-1.5"
       >
         <div className="grid grid-cols-3 gap-1">
           <NavButton
