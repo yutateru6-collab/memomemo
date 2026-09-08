@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Note, TaskItem, AttachmentItem, CloudflareSyncConfig } from '../types';
 import {
@@ -61,12 +61,32 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [openTaskMenuId, setOpenTaskMenuId] = useState<string | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editingTaskText, setEditingTaskText] = useState('');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const latestNoteRef = useRef<Note>(note);
   latestNoteRef.current = note;
+
+  useEffect(() => {
+    if (!openTaskMenuId) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(`[data-task-menu-container="${openTaskMenuId}"]`)
+      ) {
+        return;
+      }
+      setOpenTaskMenuId(null);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [openTaskMenuId]);
 
   // Update title
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -170,6 +190,31 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       ),
       updatedAt: Date.now(),
     });
+  };
+
+  // Edit Task Text
+  const handleStartTaskEdit = (task: TaskItem) => {
+    setOpenTaskMenuId(null);
+    setEditingTaskId(task.id);
+    setEditingTaskText(task.text);
+  };
+
+  const handleCommitTaskEdit = (taskId: string) => {
+    const trimmed = editingTaskText.trim();
+    const currentTask = note.tasks.find((task) => task.id === taskId);
+
+    if (trimmed && currentTask && currentTask.text !== trimmed) {
+      onUpdateNote({
+        ...note,
+        tasks: note.tasks.map((task) =>
+          task.id === taskId ? { ...task, text: trimmed } : task
+        ),
+        updatedAt: Date.now(),
+      });
+    }
+
+    setEditingTaskId(null);
+    setEditingTaskText('');
   };
 
   // Handle File Upload (Image or PDF). Read the whole selection first and then
@@ -656,15 +701,42 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                       )}
                     </button>
 
-                    <span
-                      className={`text-xs flex-1 break-words ${
-                        task.completed
-                          ? 'line-through text-neutral-400 dark:text-neutral-500'
-                          : 'text-neutral-800 dark:text-neutral-200 font-medium'
-                      }`}
-                    >
-                      {task.text}
-                    </span>
+                    {editingTaskId === task.id ? (
+                      <input
+                        data-testid="task-edit-input"
+                        type="text"
+                        value={editingTaskText}
+                        onChange={(e) => setEditingTaskText(e.target.value)}
+                        onBlur={() => handleCommitTaskEdit(task.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            e.currentTarget.blur();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditingTaskId(null);
+                            setEditingTaskText('');
+                          }
+                        }}
+                        aria-label={`${task.text} を編集`}
+                        className="flex-1 min-w-0 min-h-11 rounded-xl border border-amber-500/70 bg-white dark:bg-neutral-900 px-3 text-base text-neutral-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500/30"
+                        autoFocus
+                      />
+                    ) : (
+                      <button
+                        data-testid="task-edit-trigger"
+                        type="button"
+                        onClick={() => handleStartTaskEdit(task)}
+                        aria-label={`${task.text} を編集`}
+                        className={`flex-1 min-w-0 min-h-11 flex items-center text-left text-xs break-words rounded-lg px-1 ${
+                          task.completed
+                            ? 'line-through text-neutral-400 dark:text-neutral-500'
+                            : 'text-neutral-800 dark:text-neutral-200 font-medium'
+                        }`}
+                      >
+                        {task.text}
+                      </button>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
@@ -679,7 +751,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                       />
                     </div>
 
-                    <div className="relative">
+                    <div className="relative" data-task-menu-container={task.id}>
                       <button
                         id={`task-more-btn-${task.id}`}
                         data-testid="task-more-btn"
