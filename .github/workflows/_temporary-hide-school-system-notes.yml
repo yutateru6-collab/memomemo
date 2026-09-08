@@ -42,6 +42,7 @@ jobs:
               raise SystemExit('NoteList filter anchor not found')
 
           text = text.replace('すべて ({notes.length})', 'すべて ({visibleNotes.length})')
+          text = text.replace('{notes.length} 件のメモ', '{visibleNotes.length} 件のメモ')
           path.write_text(text)
           PY
 
@@ -55,5 +56,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/components/NoteList.tsx
-          git commit -m "fix: hide school sync records from memo list"
+          git commit -m "fix: keep school sync records out of memo counts"
           git push origin HEAD:fix/memomemo-school-cloud-sync-final-20260908
