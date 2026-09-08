@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   BookOpen,
   CalendarDays,
-  CheckSquare,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -21,8 +20,7 @@ interface CalendarViewProps {
 
 type CalendarEvent =
   | { id: string; date: string; type: 'school'; title: string; detail: string; lesson: SchoolLesson }
-  | { id: string; date: string; type: 'memo'; title: string; detail: string; note: Note }
-  | { id: string; date: string; type: 'task'; title: string; detail: string; note: Note };
+  | { id: string; date: string; type: 'memo'; title: string; detail: string; note: Note };
 
 const dateKey = (date: Date) => {
   const y = date.getFullYear();
@@ -104,18 +102,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           type: 'memo',
           title: note.title || 'メモ',
           detail: 'メモの期限・リマインダー',
-          note,
-        });
-      }
-      for (const task of note.tasks) {
-        const taskDate = dueDateKey(task.dueDate);
-        if (!taskDate) continue;
-        all.push({
-          id: `task-${note.id}-${task.id}`,
-          date: taskDate,
-          type: 'task',
-          title: task.text,
-          detail: `${note.title || 'メモ'}${task.completed ? '・完了済み' : '・未完了'}`,
           note,
         });
       }
@@ -238,8 +224,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         className={`truncate rounded px-1 py-0.5 text-[9px] sm:text-[10px] font-semibold ${
                           event.type === 'school'
                             ? 'bg-amber-500/20 text-amber-800 dark:text-amber-200'
-                            : event.type === 'task'
-                            ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
                             : 'bg-sky-500/15 text-sky-800 dark:text-sky-200'
                         }`}
                       >
@@ -278,8 +262,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 className="rounded-2xl bg-white dark:bg-[#1c1c1e] border border-neutral-200 dark:border-neutral-800 p-4"
               >
                 <div className="flex items-start gap-3">
-                  <div className={`w-10 h-10 rounded-xl shrink-0 inline-flex items-center justify-center ${event.type === 'school' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300' : event.type === 'task' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300' : 'bg-sky-500/15 text-sky-600 dark:text-sky-300'}`}>
-                    {event.type === 'school' ? <BookOpen className="w-5 h-5" /> : event.type === 'task' ? <CheckSquare className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
+                  <div className={`w-10 h-10 rounded-xl shrink-0 inline-flex items-center justify-center ${event.type === 'school' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300' : 'bg-sky-500/15 text-sky-600 dark:text-sky-300'}`}>
+                    {event.type === 'school' ? <BookOpen className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-bold break-words">{event.title}</p>

@@ -9,7 +9,6 @@ import {
   CheckSquare,
   Eye,
   Edit3,
-  Calendar,
   Clock,
   Plus,
   X,
@@ -54,7 +53,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 }) => {
   const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit');
   const [newTaskText, setNewTaskText] = useState('');
-  const [newTaskDueDate, setNewTaskDueDate] = useState('');
   const [newTagInput, setNewTagInput] = useState('');
   const [showTagInput, setShowTagInput] = useState(false);
   const [showReminderSetting, setShowReminderSetting] = useState(false);
@@ -148,7 +146,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       id: `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       text: newTaskText.trim(),
       completed: false,
-      dueDate: newTaskDueDate || undefined,
     };
 
     onUpdateNote({
@@ -158,7 +155,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     });
 
     setNewTaskText('');
-    setNewTaskDueDate('');
   };
 
   // Toggle Task Completion
@@ -181,16 +177,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     });
   };
 
-  // Update Task Due Date
-  const handleTaskDueDateChange = (taskId: string, dueDate: string) => {
-    onUpdateNote({
-      ...note,
-      tasks: note.tasks.map((t) =>
-        t.id === taskId ? { ...t, dueDate: dueDate || undefined } : t
-      ),
-      updatedAt: Date.now(),
-    });
-  };
 
   // Edit Task Text
   const handleStartTaskEdit = (task: TaskItem) => {
@@ -670,19 +656,12 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           {/* Task Items */}
           <div className="space-y-1.5">
             {note.tasks.map((task) => {
-              const isOverdue =
-                !task.completed &&
-                task.dueDate &&
-                new Date(task.dueDate).getTime() < Date.now();
-
               return (
                 <div
                   key={task.id}
                   className={`group flex items-center justify-between gap-2 p-2 rounded-xl transition-colors ${
                     task.completed
                       ? 'bg-neutral-50/60 dark:bg-neutral-900/30'
-                      : isOverdue
-                      ? 'bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50'
                       : 'bg-neutral-50 dark:bg-neutral-800/40 hover:bg-neutral-100 dark:hover:bg-neutral-800/80'
                   }`}
                 >
@@ -740,17 +719,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
-                    {/* Due Date Picker or Label */}
-                    <div className="relative flex items-center">
-                      <input
-                        type="datetime-local"
-                        value={task.dueDate || ''}
-                        onChange={(e) => handleTaskDueDateChange(task.id, e.target.value)}
-                        className="min-h-11 text-[11px] bg-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 outline-none w-28 cursor-pointer"
-                        title="タスクの期日を設定"
-                      />
-                    </div>
-
                     <div className="relative" data-task-menu-container={task.id}>
                       <button
                         id={`task-more-btn-${task.id}`}
@@ -789,33 +757,24 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             })}
           </div>
 
-          {/* Add New Task Form: stacked on phones so controls never get squeezed off-screen */}
-          <form onSubmit={handleAddTask} className="flex flex-col lg:flex-row lg:items-center gap-2 pt-1">
+          {/* Add New Task Form */}
+          <form onSubmit={handleAddTask} className="flex items-center gap-2 pt-1">
             <input
               id="new-task-text-input"
               type="text"
               placeholder="新しいタスクを追加..."
               value={newTaskText}
               onChange={(e) => setNewTaskText(e.target.value)}
-              className="w-full lg:flex-1 min-h-11 text-base lg:text-xs px-3 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="flex-1 min-w-0 min-h-11 text-base lg:text-xs px-3 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
-            <div className="flex items-center gap-2 w-full lg:w-auto">
-              <input
-                type="datetime-local"
-                value={newTaskDueDate}
-                onChange={(e) => setNewTaskDueDate(e.target.value)}
-                className="flex-1 lg:flex-none lg:w-44 min-h-11 text-base lg:text-xs px-2 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 focus:outline-none text-neutral-500"
-                title="期限日時（任意）"
-              />
-              <button
-                id="add-task-btn"
-                type="submit"
-                disabled={!newTaskText.trim()}
-                className="min-w-20 min-h-11 px-4 py-2 bg-amber-500 hover:bg-amber-400 active:bg-amber-300 disabled:opacity-40 text-black text-sm lg:text-xs font-semibold rounded-xl transition-colors"
-              >
-                追加
-              </button>
-            </div>
+            <button
+              id="add-task-btn"
+              type="submit"
+              disabled={!newTaskText.trim()}
+              className="shrink-0 min-w-20 min-h-11 px-4 py-2 bg-amber-500 hover:bg-amber-400 active:bg-amber-300 disabled:opacity-40 text-black text-sm lg:text-xs font-semibold rounded-xl transition-colors"
+            >
+              追加
+            </button>
           </form>
         </div>
 
