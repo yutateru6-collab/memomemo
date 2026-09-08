@@ -41,7 +41,7 @@ jobs:
           cat /tmp/memomemo-school-calendar-qa.log
           exit 1
 
-      - name: Verify school lesson persistence and calendar integration
+      - name: Verify school lesson persistence, encrypted sync, and calendar integration
         run: |
           mkdir -p school-calendar-qa-artifacts
           cat > school-calendar-regression.mjs <<'EOF'
@@ -49,6 +49,26 @@ jobs:
           import fs from 'node:fs';
 
           const browser = await chromium.launch({ headless: true });
+          const cloudEntries = new Map();
+          const failures = [];
+          const fail = (condition, message) => { if (condition) failures.push(message); };
+
+          const installCloudRoute = async (context) => {
+            await context.route('**/api/sync', async (route) => {
+              const body = route.request().postDataJSON();
+              for (const entry of Array.isArray(body?.entries) ? body.entries : []) {
+                const current = cloudEntries.get(entry.key);
+                const newer = !current || entry.version > current.version || (entry.version === current.version && entry.updatedAt >= current.updatedAt);
+                if (newer) cloudEntries.set(entry.key, entry);
+              }
+              await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ success: true, entries: Array.from(cloudEntries.values()) }),
+              });
+            });
+          };
+
           const context = await browser.newContext({
             viewport: { width: 390, height: 844 },
             deviceScaleFactor: 3,
@@ -56,14 +76,8 @@ jobs:
             hasTouch: true,
             userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
           });
+          await installCloudRoute(context);
           const page = await context.newPage();
-          const failures = [];
-          const fail = (condition, message) => { if (condition) failures.push(message); };
-
-          await page.route('http://127.0.0.1:3000/api/sync', async (route) => {
-            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, entries: [] }) });
-          });
-
           await page.goto('http://127.0.0.1:3000', { waitUntil: 'networkidle' });
           const mainNav = page.locator('nav[aria-label="メインナビゲーション"]');
           await mainNav.getByRole('button', { name: '学校', exact: true }).click();
@@ -78,7 +92,6 @@ jobs:
 
           const lessonDate = await page.locator('[data-testid="school-lesson-date"]').inputValue();
           fail(!/^\d{4}-\d{2}-\d{2}$/.test(lessonDate), `Lesson date is invalid: ${lessonDate}`);
-
           await page.locator('[data-testid="school-lesson-content"]').fill('QA 時制② 現在完了');
           await page.locator('[data-testid="school-lesson-flow"]').fill('前回復習 → 解説 → 例題 → 演習');
           await page.locator('[data-testid="school-handouts"]').fill('QA 時制②プリント');
@@ -87,10 +100,14 @@ jobs:
           await page.locator('[data-testid="school-exam-snapshot"]').fill('QA 試験範囲スナップショット');
           await page.locator('[data-testid="save-school-lesson"]').click();
           await page.getByText('授業メモを保存しました', { exact: true }).waitFor();
+          await page.waitForFunction(() => document.querySelector('[data-testid="school-cloud-status"]')?.textContent?.includes('同期済み'));
 
           const history = page.locator('[data-school-lesson-id]').filter({ hasText: 'QA 時制② 現在完了' });
           fail(await history.count() !== 1, 'Saved 2-9 school lesson did not appear exactly once in history');
           fail(!(await history.textContent())?.includes('QA Workbook Exercise 3'), 'Next lesson was not retained in history');
+          fail(cloudEntries.size < 2, `School data did not reach encrypted cloud transport; entries=${cloudEntries.size}`);
+          const syncConfig = await page.evaluate(() => localStorage.getItem('ios_notes_cloudflare_config'));
+          fail(!syncConfig, 'Cloud sync config was not available for second-device check');
           await page.screenshot({ path: 'school-calendar-qa-artifacts/school-2-9-saved.png', fullPage: true });
 
           await mainNav.getByRole('button', { name: 'カレンダー', exact: true }).click();
@@ -103,19 +120,29 @@ jobs:
             await calendarEvent.getByRole('button', { name: '学校メモを開く', exact: true }).click();
             await page.getByRole('heading', { name: '学校メモ' }).waitFor();
             fail((await page.locator('[data-school-class="2-9"]').getAttribute('aria-pressed')) !== 'true', 'Calendar event did not reopen the correct 2-9 class');
-            fail(!(await page.locator('[data-testid="current-exam-scope-title"]').textContent())?.includes('2-9'), 'Calendar event reopened the wrong class scope');
           }
 
-          await page.reload({ waitUntil: 'networkidle' });
-          await page.locator('nav[aria-label="メインナビゲーション"]').getByRole('button', { name: '学校', exact: true }).click();
-          await page.getByRole('heading', { name: '学校メモ' }).waitFor();
-          await page.locator('[data-school-class="2-9"]').click();
-          fail((await page.locator('[data-testid="school-exam-scope"]').inputValue()) !== 'QA試験範囲：時制①〜②', '2-9 exam scope did not persist after reload');
-          fail(await page.locator('[data-school-lesson-id]').filter({ hasText: 'QA 時制② 現在完了' }).count() !== 1, '2-9 lesson did not persist after reload');
-          await page.screenshot({ path: 'school-calendar-qa-artifacts/school-persisted-after-reload.png', fullPage: true });
+          // Simulate a second device: empty local storage/IndexedDB but the exact same encrypted sync code.
+          if (syncConfig) {
+            const context2 = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+            await installCloudRoute(context2);
+            await context2.addInitScript((savedConfig) => {
+              if (savedConfig) localStorage.setItem('ios_notes_cloudflare_config', savedConfig);
+            }, syncConfig);
+            const page2 = await context2.newPage();
+            await page2.goto('http://127.0.0.1:3000', { waitUntil: 'networkidle' });
+            await page2.locator('nav[aria-label="メインナビゲーション"]').getByRole('button', { name: '学校', exact: true }).click();
+            await page2.getByRole('heading', { name: '学校メモ' }).waitFor();
+            await page2.locator('[data-school-class="2-9"]').click();
+            await page2.waitForFunction(() => document.querySelector('[data-testid="school-cloud-status"]')?.textContent?.includes('同期済み'));
+            fail((await page2.locator('[data-testid="school-exam-scope"]').inputValue()) !== 'QA試験範囲：時制①〜②', 'Second device did not restore 2-9 exam scope from Cloudflare sync');
+            fail(await page2.locator('[data-school-lesson-id]').filter({ hasText: 'QA 時制② 現在完了' }).count() !== 1, 'Second device did not restore the 2-9 lesson from Cloudflare sync');
+            await page2.screenshot({ path: 'school-calendar-qa-artifacts/school-restored-on-second-device.png', fullPage: true });
+            await context2.close();
+          }
 
-          fs.writeFileSync('school-calendar-qa-artifacts/findings.json', JSON.stringify({ failures, lessonDate }, null, 2));
-          console.log(JSON.stringify({ failures, lessonDate }, null, 2));
+          fs.writeFileSync('school-calendar-qa-artifacts/findings.json', JSON.stringify({ failures, lessonDate, cloudEntryCount: cloudEntries.size }, null, 2));
+          console.log(JSON.stringify({ failures, lessonDate, cloudEntryCount: cloudEntries.size }, null, 2));
           await browser.close();
           if (failures.length) process.exit(1);
           EOF

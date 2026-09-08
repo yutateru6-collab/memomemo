@@ -15,10 +15,20 @@ export interface SchoolLesson {
   completed: boolean;
   createdAt: number;
   updatedAt: number;
+  /** Monotonic conflict-resolution counter for encrypted Cloudflare sync. */
+  version?: number;
 }
 
 export interface SchoolClassSettings {
   classId: SchoolClassId;
   examScope: string;
   updatedAt: number;
+  /** Monotonic conflict-resolution counter for encrypted Cloudflare sync. */
+  version?: number;
+}
+
+export interface SchoolLessonTombstone {
+  lessonId: string;
+  deletedAt: number;
+  version: number;
 }

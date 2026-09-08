@@ -13,6 +13,7 @@ import {
   SyncTombstone,
 } from './cloudVault';
 import { filterRetiredSampleNotes, isRetiredSampleNoteId } from './retiredSamples';
+import { isSchoolCloudPayload, isSchoolCloudTombstonePayload } from './schoolCloudSync';
 
 export interface CloudflareSyncResult {
   success: boolean;
@@ -101,40 +102,24 @@ function isLocalQaOrigin(): boolean {
 
 /**
  * End-to-end encrypted synchronization.
- *
- * The raw sync code never leaves the browser. A one-way derived vault token is sent
- * to Cloudflare only to select the user's opaque KV prefix. Note contents, tasks,
- * tags, reminder data, and attachment data URLs are AES-GCM encrypted client-side.
+ * The raw sync code never leaves the browser. School-only encrypted entities can share
+ * the same vault; this note synchronizer deliberately ignores them after successful decryption.
  */
 export async function syncWithCloudflare(
   notes: Note[],
   config: CloudflareSyncConfig
 ): Promise<CloudflareSyncResult> {
   const workerUrl = resolveWorkerUrl(config.workerUrl);
-  if (!workerUrl) {
-    return { success: false, error: 'Cloudflare同期URLの形式が正しくありません。' };
-  }
-
+  if (!workerUrl) return { success: false, error: 'Cloudflare同期URLの形式が正しくありません。' };
   if (!isValidSyncCode(config.syncCode)) {
-    return {
-      success: false,
-      error: '同期コードが設定されていません。クラウド同期画面で同期コードを作成または入力してください。',
-    };
+    return { success: false, error: '同期コードが設定されていません。クラウド同期画面で同期コードを作成または入力してください。' };
   }
-
-  if (!navigator.onLine) {
-    return {
-      success: false,
-      error: '現在オフラインです。インターネット接続が復帰したら同期できます。',
-    };
-  }
+  if (!navigator.onLine) return { success: false, error: '現在オフラインです。インターネット接続が復帰したら同期できます。' };
 
   try {
     const tombstones = loadTombstones();
     const encryptedNotes = await Promise.all(notes.map((note) => encryptNote(note, config.syncCode)));
-    const encryptedTombstones = await Promise.all(
-      tombstones.map((tombstone) => encryptTombstone(tombstone, config.syncCode))
-    );
+    const encryptedTombstones = await Promise.all(tombstones.map((tombstone) => encryptTombstone(tombstone, config.syncCode)));
     const vaultToken = await deriveVaultToken(config.syncCode);
 
     const requestBody: Record<string, unknown> = {
@@ -143,9 +128,6 @@ export async function syncWithCloudflare(
       entries: [...encryptedNotes, ...encryptedTombstones],
       clientTimestamp: Date.now(),
     };
-
-    // The old browser regression probes run only on localhost. Keep their plaintext
-    // compatibility field there; deployed Cloudflare clients never send it.
     if (isLocalQaOrigin()) requestBody.notes = notes;
 
     const response = await fetch(workerUrl, {
@@ -157,49 +139,36 @@ export async function syncWithCloudflare(
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
-      return {
-        success: false,
-        error: `Cloudflare同期エラー (${response.status}): ${errorText || response.statusText}`,
-      };
+      return { success: false, error: `Cloudflare同期エラー (${response.status}): ${errorText || response.statusText}` };
     }
 
     const data: unknown = await response.json().catch(() => null);
-
     if (data && typeof data === 'object' && 'entries' in data) {
       const rawEntries = (data as { entries?: unknown }).entries;
       if (!Array.isArray(rawEntries) || !rawEntries.every(isEncryptedEntry)) {
-        return {
-          success: false,
-          error: '同期先から不正な暗号化データが返されました。ローカルのメモは変更していません。',
-        };
+        return { success: false, error: '同期先から不正な暗号化データが返されました。ローカルのメモは変更していません。' };
       }
 
       const remoteNotes: Note[] = [];
       const remoteTombstones: SyncTombstone[] = [];
-
       for (const entry of rawEntries) {
         let payload: unknown;
         try {
           payload = await decryptEntry(entry, config.syncCode);
         } catch {
-          return {
-            success: false,
-            error: 'クラウドデータを復号できませんでした。同期コードが同じ端末のものか確認してください。',
-          };
+          return { success: false, error: 'クラウドデータを復号できませんでした。同期コードが同じ端末のものか確認してください。' };
         }
 
         if (entry.deleted) {
-          if (!isTombstone(payload)) {
-            return { success: false, error: 'クラウドの削除履歴が破損しています。' };
-          }
+          if (isSchoolCloudTombstonePayload(payload)) continue;
+          if (!isTombstone(payload)) return { success: false, error: 'クラウドの削除履歴が破損しています。' };
           remoteTombstones.push(payload);
           continue;
         }
 
+        if (isSchoolCloudPayload(payload)) continue;
         const parsed = parseNotesArray([payload]);
-        if (!parsed || parsed.length !== 1) {
-          return { success: false, error: 'クラウドのメモデータが破損しています。' };
-        }
+        if (!parsed || parsed.length !== 1) return { success: false, error: 'クラウドのメモデータが破損しています。' };
         const remoteNote = parsed[0];
         if (isRetiredSampleNoteId(remoteNote.id)) {
           saveTombstones([
@@ -218,10 +187,7 @@ export async function syncWithCloudflare(
     if (data && typeof data === 'object' && 'notes' in data) {
       const parsedRemoteNotes = parseNotesArray((data as { notes?: unknown }).notes);
       if (!parsedRemoteNotes) {
-        return {
-          success: false,
-          error: '同期先から不正なメモデータが返されました。ローカルの内容は上書きしていません。',
-        };
+        return { success: false, error: '同期先から不正なメモデータが返されました。ローカルの内容は上書きしていません。' };
       }
       for (const remoteNote of parsedRemoteNotes) {
         if (isRetiredSampleNoteId(remoteNote.id)) {
@@ -231,20 +197,12 @@ export async function syncWithCloudflare(
           ]);
         }
       }
-      return {
-        success: true,
-        remoteNotes: filterRetiredSampleNotes(parsedRemoteNotes),
-        remoteTombstones: [],
-      };
+      return { success: true, remoteNotes: filterRetiredSampleNotes(parsedRemoteNotes), remoteTombstones: [] };
     }
 
-    if (data && typeof data === 'object' && (data as { success?: unknown }).success === true) {
-      return { success: true };
-    }
-
+    if (data && typeof data === 'object' && (data as { success?: unknown }).success === true) return { success: true };
     return { success: false, error: '同期先から予期しない応答が返されました。' };
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : '同期中に通信エラーが発生しました';
-    return { success: false, error: message };
+    return { success: false, error: err instanceof Error ? err.message : '同期中に通信エラーが発生しました' };
   }
 }

@@ -84,16 +84,16 @@ export async function deriveVaultToken(syncCode: string): Promise<string> {
   return toBase64Url(digest);
 }
 
-async function deriveEntryKey(secret: Uint8Array, noteId: string): Promise<string> {
+async function deriveEntryKey(secret: Uint8Array, entityId: string): Promise<string> {
   const digest = await sha256(
-    concatBytes(encoder.encode('memomemo-entry-v1:'), secret, encoder.encode(':' + noteId))
+    concatBytes(encoder.encode('memomemo-entry-v1:'), secret, encoder.encode(':' + entityId))
   );
   return toBase64Url(digest);
 }
 
-async function encryptPayload(
+export async function encryptCloudPayload(
   syncCode: string,
-  noteId: string,
+  entityId: string,
   payload: unknown,
   version: number,
   updatedAt: number,
@@ -103,7 +103,7 @@ async function encryptPayload(
   const plaintext = encoder.encode(JSON.stringify(payload));
   if (plaintext.byteLength > MAX_NOTE_PLAINTEXT_BYTES) {
     throw new Error(
-      'このメモは添付ファイルを含めた容量が大きすぎるためクラウド同期できません。端末には保存されています。大きな添付は約12MB以下を目安にしてください。'
+      'このデータは添付ファイルを含めた容量が大きすぎるためクラウド同期できません。端末には保存されています。大きな添付は約12MB以下を目安にしてください。'
     );
   }
 
@@ -114,8 +114,8 @@ async function encryptPayload(
   );
 
   return {
-    key: await deriveEntryKey(secret, noteId),
-    version,
+    key: await deriveEntryKey(secret, entityId),
+    version: Math.max(1, Math.floor(version)),
     updatedAt,
     deleted,
     iv: toBase64Url(iv),
@@ -124,14 +124,14 @@ async function encryptPayload(
 }
 
 export async function encryptNote(note: Note, syncCode: string): Promise<EncryptedCloudEntry> {
-  return encryptPayload(syncCode, note.id, note, note.version, note.updatedAt, false);
+  return encryptCloudPayload(syncCode, note.id, note, note.version, note.updatedAt, false);
 }
 
 export async function encryptTombstone(
   tombstone: SyncTombstone,
   syncCode: string
 ): Promise<EncryptedCloudEntry> {
-  return encryptPayload(
+  return encryptCloudPayload(
     syncCode,
     tombstone.id,
     { ...tombstone, deleted: true },
