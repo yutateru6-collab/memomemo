@@ -155,3 +155,132 @@
     padding-bottom: max(112px, calc(var(--safe-area-bottom) + 88px));
   }
 }
+
+/* Desktop workspace: keep the mobile UI untouched, but use the available width on
+   mouse/trackpad PCs for a persistent sidebar and denser side-by-side work. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .memomemo-shell {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .desktop-content,
+  .app-section {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .app-section-memo > div {
+    min-height: 100dvh;
+    height: 100dvh;
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+
+  .app-section-memo .max-w-5xl {
+    max-width: 100% !important;
+  }
+
+  .app-section-memo > div > .max-w-5xl:first-child {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+
+  .app-section-memo > div > .max-w-5xl.flex.justify-center {
+    height: calc(100dvh - 44px) !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    padding-left: 18px !important;
+    padding-right: 18px !important;
+    padding-bottom: 16px !important;
+  }
+
+  .app-section-memo > div > .max-w-5xl.flex.justify-center > div {
+    border-radius: 24px !important;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.10) !important;
+  }
+
+  .app-section-school,
+  .app-section-calendar {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .app-section-school > div,
+  .app-section-calendar > div {
+    min-height: 100dvh;
+    padding-bottom: 32px !important;
+  }
+
+  .app-section-school .max-w-3xl,
+  .app-section-calendar .max-w-3xl {
+    max-width: 1180px !important;
+  }
+
+  .app-section-school main.max-w-3xl {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.75fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  .app-section-school main.max-w-3xl > section[class*="bg-amber-500/10"] {
+    grid-column: 1 / -1;
+  }
+
+  .app-section-school main.max-w-3xl > section:has([data-testid="school-exam-scope"]) {
+    grid-column: 1;
+  }
+
+  .app-section-school main.max-w-3xl > section:last-child {
+    grid-column: 2;
+    position: sticky;
+    top: 126px;
+    max-height: calc(100dvh - 150px);
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .app-section-calendar main.max-w-3xl {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.75fr);
+    gap: 20px;
+    align-items: start;
+  }
+
+  .app-section-calendar main.max-w-3xl > section:first-child {
+    grid-column: 1;
+  }
+
+  .app-section-calendar main.max-w-3xl > section:last-child {
+    grid-column: 2;
+    position: sticky;
+    top: 104px;
+    max-height: calc(100dvh - 130px);
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .app-section-calendar [data-calendar-date] {
+    min-height: 92px;
+  }
+
+  .app-section-school textarea,
+  .app-section-school input,
+  .app-section-calendar button,
+  .app-section-memo button {
+    scroll-margin-top: 96px;
+  }
+}
+
+@media (min-width: 1440px) and (hover: hover) and (pointer: fine) {
+  .app-section-school .max-w-3xl,
+  .app-section-calendar .max-w-3xl {
+    max-width: 1320px !important;
+  }
+
+  .app-section-memo > div > .max-w-5xl.flex.justify-center {
+    padding-left: 26px !important;
+    padding-right: 26px !important;
+  }
+}
